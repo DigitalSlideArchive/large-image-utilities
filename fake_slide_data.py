@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+
+# pip install girder_client fake_biology
+
 import argparse
 import os
 import random

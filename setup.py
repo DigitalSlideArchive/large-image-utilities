@@ -29,14 +29,13 @@ def prerelease_local_scheme(version):
 try:
     from setuptools_scm import get_version
 
-    version = get_version(root='../..', local_scheme=prerelease_local_scheme)
-    limit_version = f'>={version}' if '+' not in version else ''
+    version = get_version(local_scheme=prerelease_local_scheme)
 except (ImportError, LookupError):
-    limit_version = ''
+    pass
 
 setup(
     name='large-image-utilities-experimental',
-    use_scm_version={'root': '../..', 'local_scheme': prerelease_local_scheme,
+    use_scm_version={'local_scheme': prerelease_local_scheme,
                      'fallback_version': 'development'},
     setup_requires=['setuptools-scm'],
     description=description,
@@ -57,12 +56,12 @@ setup(
         'Programming Language :: Python :: 3.10',
     ],
     install_requires=[
-        f'large-image{limit_version}',
-        'numpy',
+        'large-image',
+        'tifftools',
     ],
     extras_require={
         'sources': [
-            f'large-image[sources]{limit_version}',
+            f'large-image[sources]',
         ],
     },
     py_modules=['ttdump_to_tiff', 'lisource_compare'],
