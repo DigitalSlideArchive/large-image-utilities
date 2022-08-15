@@ -80,7 +80,7 @@ if __name__ == '__main__':  # noqa
         '"celltype", "range:(low),(high)", "floatrange:(low),(high)", '
         '"enum:(comma separated list)".')
     parser.add_argument(
-        '--annotation', help='(chance[0-1]),(min points),(max points)')
+        '--annotation', help='(chance[0-1]),(min points),(max points),(iterations)')
 
     args = parser.parse_args()
     if args.verbose >= 2:
