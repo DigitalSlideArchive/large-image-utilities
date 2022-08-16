@@ -30,11 +30,12 @@ def histotext(h, maxchan=None):
     return result
 
 
-def write_thumb(jpeg, source, prefix, name):
-    if not prefix or not jpeg:
+def write_thumb(img, source, prefix, name, opts=None):
+    if not prefix or not img:
         return
-    path = '%s-%s-%s.jpg' % (prefix, name, source)
-    open(path, 'wb').write(jpeg)
+    ext = 'jpg' if not opts or not opts.encoding else opts.encoding.lower()
+    path = '%s-%s-%s.%s' % (prefix, name, source, ext)
+    open(path, 'wb').write(img)
 
 
 def float_format(val, length):
@@ -92,11 +93,14 @@ def source_compare(sourcePath, opts):  # noqa
     thumbs = opts.thumbs
     if thumbs and os.path.isdir(thumbs):
         thumbs = os.path.join(thumbs, 'compare-' + os.path.basename(sourcePath))
+    kwargs = {}
+    if opts.encoding:
+        kwargs['encoding'] = opts.encoding
     for source, couldread in canread:
         sys.stdout.write('%s' % (source + ' ' * (slen - len(source))))
         sys.stdout.flush()
         try:
-            ts = large_image.tilesource.AvailableTileSources[source](sourcePath)
+            ts = large_image.tilesource.AvailableTileSources[source](sourcePath, **kwargs)
         except Exception as exp:
             sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
             sexp = sexp.replace(sourcePath, '<path>')
@@ -115,7 +119,7 @@ def source_compare(sourcePath, opts):  # noqa
         sys.stdout.flush()
         t = time.time()
         try:
-            img = ts.getThumbnail()
+            img = ts.getThumbnail(**kwargs)
         except Exception as exp:
             sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
             sexp = sexp.replace(sourcePath, '<path>')
@@ -128,32 +132,32 @@ def source_compare(sourcePath, opts):  # noqa
         thumbtime = time.time() - t
         sys.stdout.write(' %8.3fs' % thumbtime)
         sys.stdout.flush()
-        write_thumb(img[0], source, thumbs, 'thumbnail')
+        write_thumb(img[0], source, thumbs, 'thumbnail', opts)
         t = time.time()
         img = ts.getTile(0, 0, 0, sparseFallback=True)
         tile0time = time.time() - t
         sys.stdout.write(' %8.3fs' % tile0time)
         sys.stdout.flush()
-        write_thumb(img, source, thumbs, 'tile0')
+        write_thumb(img, source, thumbs, 'tile0', opts)
         t = time.time()
         img = ts.getTile(hx, hy, levels - 1, sparseFallback=True)
         tilentime = time.time() - t
         sys.stdout.write(' %8.3fs' % tilentime)
         sys.stdout.flush()
-        write_thumb(img, source, thumbs, 'tilen')
+        write_thumb(img, source, thumbs, 'tilen', opts)
         if frames > 1:
             t = time.time()
             img = ts.getTile(0, 0, 0, frame=frames - 1, sparseFallback=True)
             tilef0time = time.time() - t
             sys.stdout.write(' %8.3fs' % tilef0time)
             sys.stdout.flush()
-            write_thumb(img, source, thumbs, 'tilef0')
+            write_thumb(img, source, thumbs, 'tilef0', opts)
             t = time.time()
             img = ts.getTile(hx, hy, levels - 1, frame=frames - 1, sparseFallback=True)
             tilefntime = time.time() - t
             sys.stdout.write(' %8.3fs' % tilefntime)
             sys.stdout.flush()
-            write_thumb(img, source, thumbs, 'tilefn')
+            write_thumb(img, source, thumbs, 'tilefn', opts)
         sys.stdout.write('\n')
 
         sys.stdout.write('%s' % (
@@ -233,11 +237,13 @@ def command():
     parser.add_argument(
         '--all', action='store_true',
         help='All sources to read all files.  Otherwise, some sources avoid '
-        'some files based on name,')
+        'some files based on name.')
     parser.add_argument(
         '--thumbs', type=str, required=False,
         help='Location to write thumbnails of results.  If this is not an '
         'existing directory, it is a prefix for the resultant files.')
+    parser.add_argument(
+        '--encoding', help='Optional encoding for tiles (e.g., PNG)')
     opts = parser.parse_args()
     if not large_image.tilesource.AvailableTileSources:
         large_image.tilesource.loadTileSources()
