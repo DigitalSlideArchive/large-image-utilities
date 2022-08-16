@@ -4,6 +4,7 @@ import argparse
 import glob
 import math
 import os
+import pprint
 import sys
 import time
 
@@ -216,6 +217,15 @@ def source_compare(sourcePath, opts):  # noqa
                     sys.stdout.write(' %8.3fs' % t)
                     sys.stdout.write('\n')
                     sys.stdout.flush()
+        if opts.metadata:
+            sys.stdout.write(pprint.pformat(ts.getMetadata()).strip() + '\n')
+        if opts.internal:
+            sys.stdout.write(pprint.pformat(ts.getInternalMetadata()).strip() + '\n')
+        if opts.assoc:
+            sys.stdout.write(pprint.pformat(ts.getAssociatedImagesList()).strip() + '\n')
+            for assoc in ts.getAssociatedImagesList():
+                img = ts.getAssociatedImage(assoc, **kwargs)
+                write_thumb(img[0], source, thumbs, 'assoc-%s' % assoc, opts)
 
 
 def command():
@@ -243,7 +253,20 @@ def command():
         help='Location to write thumbnails of results.  If this is not an '
         'existing directory, it is a prefix for the resultant files.')
     parser.add_argument(
+        '--metadata', action='store_true',
+        help='Print metadata from the file.')
+    parser.add_argument(
+        '--internal', action='store_true',
+        help='Print internal metadata from the file.')
+    parser.add_argument(
+        '--assoc', '--associated', action='store_true',
+        help='List associated images from the file.')
+    parser.add_argument(
         '--encoding', help='Optional encoding for tiles (e.g., PNG)')
+    # TODO append this to a list to allow multiple encodings tested
+    # TODO add projection to add a list of projections to test
+    # TODO add a flag to skip non-geospatial sources if a projection is used
+    # TODO add an option to add a list of styles to test with
     opts = parser.parse_args()
     if not large_image.tilesource.AvailableTileSources:
         large_image.tilesource.loadTileSources()
