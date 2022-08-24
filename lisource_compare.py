@@ -98,6 +98,10 @@ def source_compare(sourcePath, opts):  # noqa
     if opts.encoding:
         kwargs['encoding'] = opts.encoding
     for source, couldread in canread:
+        if getattr(opts, 'skipsource', None) and source in opts.skipsource:
+            continue
+        if getattr(opts, 'usesource', None) and source not in opts.usesource:
+            continue
         sys.stdout.write('%s' % (source + ' ' * (slen - len(source))))
         sys.stdout.flush()
         try:
@@ -240,6 +244,20 @@ def command():
     parser.add_argument(
         'source', nargs='+', type=str,
         help='Source file to read and analyze')
+    parser.add_argument(
+        '--usesource', '--use', action='append',
+        help='Only use the specified source.  Can be specified multiple times.')
+    parser.add_argument(
+        '--usesource', '--use', action='append',
+        help='Only use the specified source.  Can be specified multiple times.')
+    parser.add_argument(
+        '--skipsource', '--skip', action='append',
+        help='Do not use the specified source.  Can be specified multiple '
+        'times.')
+    parser.add_argument(
+        '--skipsource', '--skip', action='append',
+        help='Do not use the specified source.  Can be specified multiple '
+        'times.')
     parser.add_argument('--full', action='store_true', help='Run histogram on full image')
     parser.add_argument(
         '--histogram-levels', '--hl', action='store_true', dest='histlevels',
