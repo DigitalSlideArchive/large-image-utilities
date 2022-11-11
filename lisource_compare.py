@@ -248,13 +248,6 @@ def command():
         '--usesource', '--use', action='append',
         help='Only use the specified source.  Can be specified multiple times.')
     parser.add_argument(
-        '--usesource', '--use', action='append',
-        help='Only use the specified source.  Can be specified multiple times.')
-    parser.add_argument(
-        '--skipsource', '--skip', action='append',
-        help='Do not use the specified source.  Can be specified multiple '
-        'times.')
-    parser.add_argument(
         '--skipsource', '--skip', action='append',
         help='Do not use the specified source.  Can be specified multiple '
         'times.')

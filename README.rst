@@ -16,4 +16,7 @@ tddump_to_tiff.py
 
 Use output from ``tifftools dump <file>`` to generate a tiff that functions much the same as the original, though with uncompressed and bland image data. 
 
+copy_annotations.py
+-------------------
 
+Duplicate folders, items, and annotations between two girder servers.
