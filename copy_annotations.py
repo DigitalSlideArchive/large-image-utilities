@@ -3,6 +3,7 @@
 import argparse
 import os
 import random
+import tempfile
 
 import girder_client.cli
 
@@ -25,10 +26,12 @@ def copy_folder(gcs, gcd, sparent, dparent):
             gcd.addMetadataToItem(ditem['_id'], sitem.get('meta', {}))
         if len(list(gcs.listFile(sitem['_id']))) != len(list(gcd.listFile(ditem['_id']))):
             for file in gcs.listFile(sitem['_id']):
-                print('file', file['name'])
-                gcs.downloadFile(file['_id'], 'temp.tmp')
-                gcd.uploadFileToItem(
-                    ditem['_id'], 'temp.tmp', mimeType=file['mimeType'], filename=file['name'])
+                print('file', file['name'], file['size'])
+                with tempfile.TemporaryDirectory() as tmpdirname:
+                    temppath = os.path.join(tmpdirname, 'temp.tmp')
+                    gcs.downloadFile(file['_id'], temppath)
+                    gcd.uploadFileToItem(
+                        ditem['_id'], temppath, mimeType=file['mimeType'], filename=file['name'])
         if (not len(gcs.get('annotation', parameters={'itemId': sitem['_id']})) or
                 len(gcd.get('annotation', parameters={'itemId': ditem['_id']}))):
             continue
@@ -51,13 +54,33 @@ def copy_data(opts):
     gcd = girder_client.cli.GirderCli(
         apiUrl=opts.dest_api, username=opts.dest_user, password=opts.dest_password)
     gcd.progressReporterCls = girder_client._NoopProgressReporter
-    stop = gcs.get('resource/lookup', parameters={'path': opts.src_path})
+    copy_resource(gcs, gcd, opts.src_path, opts.dest_path)
+
+
+def copy_resource(gcs, gcd, src_path, dest_path):
+    if dest_path.split(os.path.sep)[-1] == '.':
+        dest_path = os.path.sep.join(
+            dest_path.split(os.path.sep)[:-1] + src_path.split(os.path.sep)[-1:])
+    if src_path == '/':
+        for path in ['user', 'collection']:
+            copy_resource(gcs, gcd, os.path.join(src_path, path), os.path.join(dest_path, path))
+    if src_path.rstrip('/') == '/user':
+        for user in gcs.listUser():
+            user_path = gcs.get(f'resource/{user["_id"]}/path', parameters={'type': 'user'})
+            copy_resource(gcs, gcd, user_path, os.path.join(
+                dest_path, user_path.split(os.path.sep)[-1]))
+    if src_path.rstrip('/') == '/collection':
+        for coll in gcs.listCollection():
+            coll_path = gcs.get(f'resource/{coll["_id"]}/path', parameters={'type': 'collection'})
+            copy_resource(gcs, gcd, coll_path, os.path.join(
+                dest_path, user_path.split(os.path.sep)[-1]))
+    stop = gcs.get('resource/lookup', parameters={'path': src_path})
     try:
-        dtop = gcd.get('resource/lookup', parameters={'path': opts.dest_path})
+        dtop = gcd.get('resource/lookup', parameters={'path': dest_path})
     except girder_client.HttpError:
         dtop = None
     if dtop is None and stop['_modelType'] in {'user', 'collection'}:
-        dest_parts = opts.dest_path.rstrip(os.path.sep).split(os.path.sep)
+        dest_parts = dest_path.rstrip(os.path.sep).split(os.path.sep)
         if len(dest_parts) == 3 and dest_parts[0] == '' and (
                 dest_parts[1] == 'colelction' or dest_parts[1] == stop['_modelType']):
             if dest_parts[1] == 'user':
@@ -82,6 +105,9 @@ if __name__ == '__main__':
     parser.add_argument('--src-password', help='Source password.')
     parser.add_argument('--dest-password', help='Destination password.')
     parser.add_argument('--src-path', help='Source resource path.')
-    parser.add_argument('--dest-path', help='Destination resource path.')
+    parser.add_argument(
+        '--dest-path', help='Destination resource path.  If the last '
+        'component of this is ".", it is taken from the last component of '
+        'the source resource path.')
     opts = parser.parse_args()
     copy_data(opts)

@@ -20,3 +20,8 @@ copy_annotations.py
 -------------------
 
 Duplicate folders, items, and annotations between two girder servers.
+
+li_summary.py
+-------------
+
+Report on how a large image is read by default.

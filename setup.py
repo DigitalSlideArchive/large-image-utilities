@@ -54,21 +54,25 @@ setup(
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
     ],
     install_requires=[
+        'girder-client',
         'large-image',
         'tifftools',
     ],
     extras_require={
         'sources': [
-            f'large-image[sources]',
+            'large-image[sources]',
         ],
     },
-    py_modules=['ttdump_to_tiff', 'lisource_compare'],
+    py_modules=['ttdump_to_tiff', 'lisource_compare', 'li_summary', 'copy_annotations'],
     entry_points={
         'console_scripts': [
             'ttdump_to_tiff = ttdump_to_tiff:command',
             'lisource_compare = lisource_compare:command',
+            'li_summary = li_summary:command',
+            'copy_annotations = copy_annotations:command',
         ]
     },
     python_requires='>=3.6',

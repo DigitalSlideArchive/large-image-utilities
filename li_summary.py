@@ -26,8 +26,9 @@ def source_check(sourcePath, opts):  # noqa
     try:
         li = large_image.open(sourcePath)
     except Exception:
-        sys.stdout.write('%-70s %s\n' % ('-- not a large image --', sourcePath))
+        sys.stdout.write('%-82s %s\n' % ('-- not a large image --', sourcePath))
         sys.stdout.flush()
+        return
     metadata = li.getMetadata()
     sys.stdout.write(format % (
         metadata['sizeX'],
