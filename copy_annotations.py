@@ -57,13 +57,21 @@ def copy_data(opts):
     copy_resource(gcs, gcd, opts.src_path, opts.dest_path)
 
 
-def copy_resource(gcs, gcd, src_path, dest_path):
+def copy_resource(gcs, gcd, src_path, dest_path):  # noqa
     if dest_path.split(os.path.sep)[-1] == '.':
         dest_path = os.path.sep.join(
             dest_path.split(os.path.sep)[:-1] + src_path.split(os.path.sep)[-1:])
     if src_path == '/':
         for path in ['user', 'collection']:
             copy_resource(gcs, gcd, os.path.join(src_path, path), os.path.join(dest_path, path))
+    if src_path.rstrip('/') in {'/user', '/collection'}:
+        try:
+            gcd.get('resource/lookup', parameters={'path': dest_path})
+        except Exception:
+            dparent = gcd.get('resource/lookup', parameters={'path': os.path.dirname(dest_path)})
+            gcd.createFolder(
+                dparent['_id'], os.path.basename(dest_path), '',
+                dparent['_modelType'], True, True)
     if src_path.rstrip('/') == '/user':
         for user in gcs.listUser():
             user_path = gcs.get(f'resource/{user["_id"]}/path', parameters={'type': 'user'})
@@ -73,7 +81,7 @@ def copy_resource(gcs, gcd, src_path, dest_path):
         for coll in gcs.listCollection():
             coll_path = gcs.get(f'resource/{coll["_id"]}/path', parameters={'type': 'collection'})
             copy_resource(gcs, gcd, coll_path, os.path.join(
-                dest_path, user_path.split(os.path.sep)[-1]))
+                dest_path, coll_path.split(os.path.sep)[-1]))
     stop = gcs.get('resource/lookup', parameters={'path': src_path})
     try:
         dtop = gcd.get('resource/lookup', parameters={'path': dest_path})
@@ -82,7 +90,7 @@ def copy_resource(gcs, gcd, src_path, dest_path):
     if dtop is None and stop['_modelType'] in {'user', 'collection'}:
         dest_parts = dest_path.rstrip(os.path.sep).split(os.path.sep)
         if len(dest_parts) == 3 and dest_parts[0] == '' and (
-                dest_parts[1] == 'colelction' or dest_parts[1] == stop['_modelType']):
+                dest_parts[1] == 'collection' or dest_parts[1] == stop['_modelType']):
             if dest_parts[1] == 'user':
                 dtop = gcd.createUser(
                     stop['login'], stop['email'], stop['firstName'],
@@ -91,6 +99,11 @@ def copy_resource(gcs, gcd, src_path, dest_path):
                 dtop = gcd.createCollection(stop['login'], 'From user account', False)
             else:
                 dtop = gcd.createCollection(stop['name'], stop['description'], stop['public'])
+        else:
+            dparent = gcd.get('resource/lookup', parameters={'path': os.path.dirname(dest_path)})
+            dtop = gcd.createFolder(
+                dparent['_id'], os.path.basename(dest_path), '',
+                dparent['_modelType'], True, True)
     copy_folder(gcs, gcd, stop, dtop)
 
 
