@@ -92,6 +92,7 @@ def main(sourceName, destName, compression):  # noqa
     currentName = None
     info = {}
     lastascii = None
+    isgeo = False
     for line in open(sourceName).readlines():
         line = line.rstrip()
         if line.startswith('-- ') and line.endswith(' --'):
@@ -112,7 +113,8 @@ def main(sourceName, destName, compression):  # noqa
         tag = re.match(
             r'^ *(([^ ]+) |)([0-9]+) \(0x([0-9A-F]+)\) ([A-Z]+[A-Z0-9]*): (<([0-9]+)> |)(.*)$',
             line)
-        if not tag and not subifd and not tdir:
+        geotag = re.match(r'^ *([A-Za-z]+): (.*)$', line) if isgeo else None
+        if not tag and not subifd and not tdir and not geotag:
             if lastascii:
                 lastascii['data'] += '\n' + line
             continue
@@ -165,7 +167,59 @@ def main(sourceName, destName, compression):  # noqa
                         tifftools.Tag[tag.groups()[2]].isOffsetData()):
                     data = [8] * count
                 record['data'] = data
+            isgeo = key == tifftools.Tag.GeoKeyDirectoryTag.value
+            if 'geotag' in ifd and key in {
+                    tifftools.Tag.GeoDoubleParamsTag.value,
+                    tifftools.Tag.GeoASCIIParamsTag.value}:
+                continue
             ifd['tags'][key] = record
+        if geotag:
+            if 'geotag' not in ifd:
+                ifd['geotag'] = [[1, 1, 1, 0], [], '']
+            try:
+                taginfo = tifftools.constants.GeoTiffGeoKey[geotag.groups()[0]]
+            except Exception:
+                isgeo = None
+                ifd.pop('geotag', None)
+                continue
+            key = taginfo.value
+            if taginfo['datatype'] == tifftools.Datatype.DOUBLE:
+                ttype = tifftools.Tag.GeoDoubleParamsTag.value
+                val = [float(v) for v in geotag.groups()[1].split()]
+                if len(val) == 1 and int(val[0]) == val[0] and val[0] >= -32768 and val[0] <= 32767:
+                    ttype, count, offset = 0, 1, int(val[0])
+                else:
+                    count = len(val)
+                    offset = len(ifd['geotag'][1])
+                    ifd['geotag'][1].extend(val)
+            elif taginfo['datatype'] == tifftools.Datatype.ASCII:
+                ttype = tifftools.Tag.GeoASCIIParamsTag.value
+                val = geotag.groups()[1] + '|'
+                count = len(val)
+                offset = len(ifd['geotag'][2])
+                ifd['geotag'][2] += val
+            else:
+                ttype = 0
+                count = 1
+                offset = int(geotag.groups()[1])
+            ifd['geotag'][0].extend([key, ttype, count, offset])
+            ifd['geotag'][0][3] += 1
+            ifd['tags'][tifftools.Tag.GeoKeyDirectoryTag.value] = {
+                'datatype': tifftools.Datatype.SHORT,
+                'count': len(ifd['geotag'][0]),
+                'data': ifd['geotag'][0]
+            }
+            if len(ifd['geotag'][1]):
+                ifd['tags'][tifftools.Tag.GeoDoubleParamsTag.value] = {
+                    'datatype': tifftools.Datatype.DOUBLE,
+                    'count': len(ifd['geotag'][1]),
+                    'data': ifd['geotag'][1]
+                }
+            if len(ifd['geotag'][2]):
+                ifd['tags'][tifftools.Tag.GeoASCIIParamsTag.value] = {
+                    'datatype': tifftools.Datatype.ASCII,
+                    'data': ifd['geotag'][2]
+                }
     if len(info):
         write(info, currentName, destName, compression)
 
@@ -176,7 +230,7 @@ def command():
     parser.add_argument('out', type=str, help='Output image filename')
     parser.add_argument(
         '--compression', default='packbits',
-        help='One of "packbis", "none" to use for the output.')
+        help='One of "packbits", "none" to use for the output.')
     opts = parser.parse_args()
     main(opts.source, opts.out, opts.compression)
 

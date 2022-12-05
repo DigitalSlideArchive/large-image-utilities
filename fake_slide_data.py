@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# pip install girder_client fake_biology
+# pip install girder_client faker_biology
 
 import argparse
 import os
