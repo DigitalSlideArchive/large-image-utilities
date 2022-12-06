@@ -15,11 +15,13 @@ def generate_hash(gc, opts, file):
     if file.get('sha512') or file.get('linkUrl'):
         return 0
     path = gc.get(f'resource/{file["_id"]}/path', parameters={'type': 'file'})
-    print(f'Getting hash for {path}')
+    if opts.verbose >= 2:
+        print(f'Getting hash for {path}')
     try:
         gc.post(f'file/{file["_id"]}/hashsum')
     except Exception:
-        print(f'--> Cannot get hash of {path} ({file})')
+        if opts.verbose >= 1:
+            print(f'--> Cannot get hash of {path} ({file})')
         return 0
     return 1
 
@@ -27,10 +29,14 @@ def generate_hash(gc, opts, file):
 def walk_files(gc, opts, baseFolder=None):
     if baseFolder is None:
         for user in gc.listUser():
+            if getattr(opts, 'filter', None) and user['login'] != opts.filter:
+                continue
             for folder in gc.listFolder(user['_id'], 'user'):
                 for file in walk_files(gc, opts, folder):
                     yield file
         for coll in gc.listCollection():
+            if getattr(opts, 'filter', None) and coll['name'] != opts.filter:
+                continue
             for folder in gc.listFolder(coll['_id'], 'collection'):
                 for file in walk_files(gc, opts, folder):
                     yield file
@@ -183,6 +189,8 @@ if __name__ == '__main__':  # noqa
         help='Minimum size of a file to remove from uploads and move to imports')
     parser.add_argument('--hash', default=True, action='store_true')
     parser.add_argument('--no-hash', dest='hash', action='store_false')
+    parser.add_argument(
+        '--filter', help='Only process users and collections that match this string')
 
     opts = parser.parse_args()
     if opts.verbose >= 2:
