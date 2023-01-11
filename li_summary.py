@@ -36,7 +36,9 @@ def source_check(sourcePath, opts):  # noqa
         return
     metadata = li.getMetadata()
     um = (metadata.get('mm_x', 0) or 0) * 1000
-    if um < 100:
+    if not um:
+        umstr = '     -'
+    elif um < 100:
         umstr = '%6.3f' % um
     else:
         prefix = 'um kM'
