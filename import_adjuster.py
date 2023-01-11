@@ -26,27 +26,49 @@ def generate_hash(gc, opts, file):
     return 1
 
 
-def walk_files(gc, opts, baseFolder=None):
+def walk_files(gc, opts, baseFolder=None):  # noqa
     if baseFolder is None:
-        for user in gc.listUser():
-            if getattr(opts, 'filter', None) and user['login'] != opts.filter:
-                continue
-            for folder in gc.listFolder(user['_id'], 'user'):
-                for file in walk_files(gc, opts, folder):
-                    yield file
-        for coll in gc.listCollection():
-            if getattr(opts, 'filter', None) and coll['name'] != opts.filter:
-                continue
-            for folder in gc.listFolder(coll['_id'], 'collection'):
-                for file in walk_files(gc, opts, folder):
-                    yield file
+        if not opts.reverse:
+            for user in gc.listUser():
+                if getattr(opts, 'filter', None) and user['login'] != opts.filter:
+                    continue
+                for folder in gc.listFolder(user['_id'], 'user'):
+                    for file in walk_files(gc, opts, folder):
+                        yield file
+            for coll in gc.listCollection():
+                if getattr(opts, 'filter', None) and coll['name'] != opts.filter:
+                    continue
+                for folder in gc.listFolder(coll['_id'], 'collection'):
+                    for file in walk_files(gc, opts, folder):
+                        yield file
+        else:
+            for coll in list(gc.listCollection())[::-1]:
+                if getattr(opts, 'filter', None) and coll['name'] != opts.filter:
+                    continue
+                for folder in list(gc.listFolder(coll['_id'], 'collection'))[::-1]:
+                    for file in walk_files(gc, opts, folder):
+                        yield file
+            for user in list(gc.listUser())[::-1]:
+                if getattr(opts, 'filter', None) and user['login'] != opts.filter:
+                    continue
+                for folder in list(gc.listFolder(user['_id'], 'user'))[::-1]:
+                    for file in walk_files(gc, opts, folder):
+                        yield file
         return
-    for folder in gc.listFolder(baseFolder['_id'], 'folder'):
-        for file in walk_files(gc, opts, folder):
-            yield file
-    for item in gc.listItem(baseFolder['_id']):
-        for file in gc.listFile(item['_id']):
-            yield file
+    if not opts.reverse:
+        for folder in gc.listFolder(baseFolder['_id'], 'folder'):
+            for file in walk_files(gc, opts, folder):
+                yield file
+        for item in gc.listItem(baseFolder['_id']):
+            for file in gc.listFile(item['_id']):
+                yield file
+    else:
+        for folder in list(gc.listFolder(baseFolder['_id'], 'folder'))[::-1]:
+            for file in walk_files(gc, opts, folder):
+                yield file
+        for item in list(gc.listItem(baseFolder['_id']))[::-1]:
+            for file in gc.listFile(item['_id']):
+                yield file
 
 
 def scan_mount(base, known, opts):
@@ -189,6 +211,7 @@ if __name__ == '__main__':  # noqa
         help='Minimum size of a file to remove from uploads and move to imports')
     parser.add_argument('--hash', default=True, action='store_true')
     parser.add_argument('--no-hash', dest='hash', action='store_false')
+    parser.add_argument('--reverse', action='store_true')
     parser.add_argument(
         '--filter', help='Only process users and collections that match this string')
 
