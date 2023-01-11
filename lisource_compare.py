@@ -31,11 +31,12 @@ def histotext(h, maxchan=None):
     return result
 
 
-def write_thumb(img, source, prefix, name, opts=None):
+def write_thumb(img, source, prefix, name, opts=None, idx=None):
     if not prefix or not img:
         return
     ext = 'jpg' if not opts or not opts.encoding else opts.encoding.lower()
-    path = '%s-%s-%s.%s' % (prefix, name, source, ext)
+    idxStr = '' if not idx else '-%s' % str(idx)
+    path = '%s-%s-%s%s.%s' % (prefix, name, source, idxStr, ext)
     open(path, 'wb').write(img)
 
 
@@ -58,9 +59,12 @@ def float_format(val, length):
 
 
 def main(opts):
-    for source in opts.source:
-        for sourcePath in sorted(glob.glob(source)):
-            source_compare(sourcePath, opts)
+    sources = sorted([sourcePath
+                      for source in opts.source
+                      for sourcePath in sorted(glob.glob(source))
+                      ])
+    for sourcePath in sources:
+        source_compare(sourcePath, opts)
 
 
 def source_compare(sourcePath, opts):  # noqa
@@ -97,139 +101,146 @@ def source_compare(sourcePath, opts):  # noqa
     kwargs = {}
     if opts.encoding:
         kwargs['encoding'] = opts.encoding
-    for source, couldread in canread:
-        if getattr(opts, 'skipsource', None) and source in opts.skipsource:
-            continue
-        if getattr(opts, 'usesource', None) and source not in opts.usesource:
-            continue
-        sys.stdout.write('%s' % (source + ' ' * (slen - len(source))))
-        sys.stdout.flush()
-        try:
-            ts = large_image.tilesource.AvailableTileSources[source](sourcePath, **kwargs)
-        except Exception as exp:
-            sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
-            sexp = sexp.replace(sourcePath, '<path>')
-            sys.stdout.write(' %s\n' % sexp[:78 - slen])
-            sys.stdout.write('%s %s\n' % (' ' * slen, sexp[78 - slen: 2 * (78 - slen)]))
+    styles = [None if val == '' else val for val in (opts.style or [None])]
+    for styleidx, style in enumerate(styles):
+        kwargs['style'] = style
+        if style is None:
+            kwargs.pop('style', None)
+        if len(styles) > 1:
+            sys.stdout.write('Style: %s\n' % (str(style)[:72]))
+        for source, couldread in canread:
+            if getattr(opts, 'skipsource', None) and source in opts.skipsource:
+                continue
+            if getattr(opts, 'usesource', None) and source not in opts.usesource:
+                continue
+            sys.stdout.write('%s' % (source + ' ' * (slen - len(source))))
             sys.stdout.flush()
-            continue
-        sys.stdout.write(' %6d %6d' % (ts.sizeX, ts.sizeY))
-        sys.stdout.flush()
-        metadata = ts.getMetadata()
-        frames = len(metadata.get('frames', [])) or 1
-        levels = metadata['levels']
-        hx = ts.sizeX // ts.tileWidth // 2
-        hy = ts.sizeY // ts.tileHeight // 2
-        sys.stdout.write('%5d' % frames)
-        sys.stdout.flush()
-        t = time.time()
-        try:
-            img = ts.getThumbnail(**kwargs)
-        except Exception as exp:
-            sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
-            sexp = sexp.replace(sourcePath, '<path>')
-            sys.stdout.write(' %s\n' % sexp[:59 - slen])
-            sys.stdout.write('%s %s\n' % (
-                ' ' * slen if not couldread else ' canread' + ' ' * (slen - 8),
-                sexp[59 - slen: (59 - slen) + (78 - slen)]))
+            try:
+                ts = large_image.tilesource.AvailableTileSources[source](sourcePath, **kwargs)
+            except Exception as exp:
+                sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
+                sexp = sexp.replace(sourcePath, '<path>')
+                sys.stdout.write(' %s\n' % sexp[:78 - slen])
+                sys.stdout.write('%s %s\n' % (' ' * slen, sexp[78 - slen: 2 * (78 - slen)]))
+                sys.stdout.flush()
+                continue
+            sys.stdout.write(' %6d %6d' % (ts.sizeX, ts.sizeY))
             sys.stdout.flush()
-            continue
-        thumbtime = time.time() - t
-        sys.stdout.write(' %8.3fs' % thumbtime)
-        sys.stdout.flush()
-        write_thumb(img[0], source, thumbs, 'thumbnail', opts)
-        t = time.time()
-        img = ts.getTile(0, 0, 0, sparseFallback=True)
-        tile0time = time.time() - t
-        sys.stdout.write(' %8.3fs' % tile0time)
-        sys.stdout.flush()
-        write_thumb(img, source, thumbs, 'tile0', opts)
-        t = time.time()
-        img = ts.getTile(hx, hy, levels - 1, sparseFallback=True)
-        tilentime = time.time() - t
-        sys.stdout.write(' %8.3fs' % tilentime)
-        sys.stdout.flush()
-        write_thumb(img, source, thumbs, 'tilen', opts)
-        if frames > 1:
+            metadata = ts.getMetadata()
+            frames = len(metadata.get('frames', [])) or 1
+            levels = metadata['levels']
+            hx = ts.sizeX // ts.tileWidth // 2
+            hy = ts.sizeY // ts.tileHeight // 2
+            sys.stdout.write('%5d' % frames)
+            sys.stdout.flush()
             t = time.time()
-            img = ts.getTile(0, 0, 0, frame=frames - 1, sparseFallback=True)
-            tilef0time = time.time() - t
-            sys.stdout.write(' %8.3fs' % tilef0time)
+            try:
+                img = ts.getThumbnail(**kwargs)
+            except Exception as exp:
+                sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
+                sexp = sexp.replace(sourcePath, '<path>')
+                sys.stdout.write(' %s\n' % sexp[:59 - slen])
+                sys.stdout.write('%s %s\n' % (
+                    ' ' * slen if not couldread else ' canread' + ' ' * (slen - 8),
+                    sexp[59 - slen: (59 - slen) + (78 - slen)]))
+                sys.stdout.flush()
+                continue
+            thumbtime = time.time() - t
+            sys.stdout.write(' %8.3fs' % thumbtime)
             sys.stdout.flush()
-            write_thumb(img, source, thumbs, 'tilef0', opts)
+            write_thumb(img[0], source, thumbs, 'thumbnail', opts, styleidx)
             t = time.time()
-            img = ts.getTile(hx, hy, levels - 1, frame=frames - 1, sparseFallback=True)
-            tilefntime = time.time() - t
-            sys.stdout.write(' %8.3fs' % tilefntime)
+            img = ts.getTile(0, 0, 0, sparseFallback=True)
+            tile0time = time.time() - t
+            sys.stdout.write(' %8.3fs' % tile0time)
             sys.stdout.flush()
-            write_thumb(img, source, thumbs, 'tilefn', opts)
-        sys.stdout.write('\n')
+            write_thumb(img, source, thumbs, 'tile0', opts, styleidx)
+            t = time.time()
+            img = ts.getTile(hx, hy, levels - 1, sparseFallback=True)
+            tilentime = time.time() - t
+            sys.stdout.write(' %8.3fs' % tilentime)
+            sys.stdout.flush()
+            write_thumb(img, source, thumbs, 'tilen', opts, styleidx)
+            if frames > 1:
+                t = time.time()
+                img = ts.getTile(0, 0, 0, frame=frames - 1, sparseFallback=True)
+                tilef0time = time.time() - t
+                sys.stdout.write(' %8.3fs' % tilef0time)
+                sys.stdout.flush()
+                write_thumb(img, source, thumbs, 'tilef0', opts, styleidx)
+                t = time.time()
+                img = ts.getTile(hx, hy, levels - 1, frame=frames - 1, sparseFallback=True)
+                tilefntime = time.time() - t
+                sys.stdout.write(' %8.3fs' % tilefntime)
+                sys.stdout.flush()
+                write_thumb(img, source, thumbs, 'tilefn', opts, styleidx)
+            sys.stdout.write('\n')
 
-        sys.stdout.write('%s' % (
-            ' ' * slen if couldread else ' !canread' + ' ' * (slen - 9)))
-        sys.stdout.write(' %6d %6d' % (ts.tileWidth, ts.tileHeight))
-        sys.stdout.write('     ')
-        sys.stdout.flush()
+            sys.stdout.write('%s' % (
+                ' ' * slen if couldread else ' !canread' + ' ' * (slen - 9)))
+            sys.stdout.write(' %6d %6d' % (ts.tileWidth, ts.tileHeight))
+            sys.stdout.write('     ')
+            sys.stdout.flush()
 
-        h = ts.histogram(onlyMinMax=True, output=dict(maxWidth=2048, maxHeight=2048))
-        maxval = max(h['max'].tolist())
-        maxval = 2 ** (int((math.log(maxval or 1) / math.log(2))) + 1) if maxval > 1 else 1
+            h = ts.histogram(onlyMinMax=True, output=dict(maxWidth=2048, maxHeight=2048))
+            maxval = max(h['max'].tolist())
+            maxval = 2 ** (int((math.log(maxval or 1) / math.log(2))) + 1) if maxval > 1 else 1
 
-        h = ts.histogram(bins=9, output=dict(maxWidth=256, maxHeight=256), range=[0, maxval])
-        maxchan = len(h['histogram'])
-        if maxchan == 4:
-            maxchan = 3
-        sys.stdout.write(' %s' % histotext(h, maxchan))
-        sys.stdout.flush()
-        h = ts.histogram(bins=9, output=dict(maxWidth=2048, maxHeight=2048), range=[0, maxval])
-        sys.stdout.write(' %s' % histotext(h, maxchan))
-        sys.stdout.flush()
-        if opts.full:
-            h = ts.histogram(bins=9, range=[0, maxval])
+            h = ts.histogram(bins=9, output=dict(maxWidth=256, maxHeight=256), range=[0, maxval])
+            maxchan = len(h['histogram'])
+            if maxchan == 4:
+                maxchan = 3
             sys.stdout.write(' %s' % histotext(h, maxchan))
             sys.stdout.flush()
-        else:
-            sys.stdout.write(' %s' % (' ' * 9))
-        if frames > 1:
-            h = ts.histogram(
-                bins=9, output=dict(maxWidth=2048, maxHeight=2048),
-                range=[0, maxval], frame=frames - 1)
+            h = ts.histogram(bins=9, output=dict(maxWidth=2048, maxHeight=2048), range=[0, maxval])
             sys.stdout.write(' %s' % histotext(h, maxchan))
             sys.stdout.flush()
             if opts.full:
-                h = ts.histogram(bins=9, range=[0, maxval], frame=frames - 1)
+                h = ts.histogram(bins=9, range=[0, maxval])
                 sys.stdout.write(' %s' % histotext(h, maxchan))
                 sys.stdout.flush()
             else:
                 sys.stdout.write(' %s' % (' ' * 9))
-        sys.stdout.write('\n')
-        if opts.histlevels:
-            for f in range(0, frames, (frames - 1) or 1):
-                for ll in range(levels):
-                    t = -time.time()
-                    h = ts.histogram(bins=32, output=dict(
-                        maxWidth=int(math.ceil(ts.sizeX / 2 ** (levels - 1 - ll))),
-                        maxHeight=int(math.ceil(ts.sizeY / 2 ** (levels - 1 - ll)))
-                    ), range=[0, maxval], frame=f)
-                    t += time.time()
-                    sys.stdout.write('%3d%5d %s' % (ll, f, histotext(h, maxchan)))
-                    sys.stdout.write(' %s %s %s %s' % (
-                        float_format(min(h['min'].tolist()[:maxchan]), 6),
-                        float_format(max(h['max'].tolist()[:maxchan]), 6),
-                        float_format(sum(h['mean'].tolist()[:maxchan]) / maxchan, 6),
-                        float_format(sum(h['stdev'].tolist()[:maxchan]) / maxchan, 6)))
-                    sys.stdout.write(' %8.3fs' % t)
-                    sys.stdout.write('\n')
+            if frames > 1:
+                h = ts.histogram(
+                    bins=9, output=dict(maxWidth=2048, maxHeight=2048),
+                    range=[0, maxval], frame=frames - 1)
+                sys.stdout.write(' %s' % histotext(h, maxchan))
+                sys.stdout.flush()
+                if opts.full:
+                    h = ts.histogram(bins=9, range=[0, maxval], frame=frames - 1)
+                    sys.stdout.write(' %s' % histotext(h, maxchan))
                     sys.stdout.flush()
-        if opts.metadata:
-            sys.stdout.write(pprint.pformat(ts.getMetadata()).strip() + '\n')
-        if opts.internal:
-            sys.stdout.write(pprint.pformat(ts.getInternalMetadata()).strip() + '\n')
-        if opts.assoc:
-            sys.stdout.write(pprint.pformat(ts.getAssociatedImagesList()).strip() + '\n')
-            for assoc in ts.getAssociatedImagesList():
-                img = ts.getAssociatedImage(assoc, **kwargs)
-                write_thumb(img[0], source, thumbs, 'assoc-%s' % assoc, opts)
+                else:
+                    sys.stdout.write(' %s' % (' ' * 9))
+            sys.stdout.write('\n')
+            if opts.histlevels:
+                for f in range(0, frames, (frames - 1) or 1):
+                    for ll in range(levels):
+                        t = -time.time()
+                        h = ts.histogram(bins=32, output=dict(
+                            maxWidth=int(math.ceil(ts.sizeX / 2 ** (levels - 1 - ll))),
+                            maxHeight=int(math.ceil(ts.sizeY / 2 ** (levels - 1 - ll)))
+                        ), range=[0, maxval], frame=f)
+                        t += time.time()
+                        sys.stdout.write('%3d%5d %s' % (ll, f, histotext(h, maxchan)))
+                        sys.stdout.write(' %s %s %s %s' % (
+                            float_format(min(h['min'].tolist()[:maxchan]), 6),
+                            float_format(max(h['max'].tolist()[:maxchan]), 6),
+                            float_format(sum(h['mean'].tolist()[:maxchan]) / maxchan, 6),
+                            float_format(sum(h['stdev'].tolist()[:maxchan]) / maxchan, 6)))
+                        sys.stdout.write(' %8.3fs' % t)
+                        sys.stdout.write('\n')
+                        sys.stdout.flush()
+            if opts.metadata:
+                sys.stdout.write(pprint.pformat(ts.getMetadata()).strip() + '\n')
+            if opts.internal:
+                sys.stdout.write(pprint.pformat(ts.getInternalMetadata()).strip() + '\n')
+            if opts.assoc:
+                sys.stdout.write(pprint.pformat(ts.getAssociatedImagesList()).strip() + '\n')
+                for assoc in ts.getAssociatedImagesList():
+                    img = ts.getAssociatedImage(assoc, **kwargs)
+                    write_thumb(img[0], source, thumbs, 'assoc-%s' % assoc, opts, styleidx)
 
 
 def command():
@@ -274,10 +285,12 @@ def command():
         help='List associated images from the file.')
     parser.add_argument(
         '--encoding', help='Optional encoding for tiles (e.g., PNG)')
+    parser.add_argument(
+        '--style', action='append',
+        help='Use the json style when testing.  Can be specified multiple times.')
     # TODO append this to a list to allow multiple encodings tested
     # TODO add projection to add a list of projections to test
     # TODO add a flag to skip non-geospatial sources if a projection is used
-    # TODO add an option to add a list of styles to test with
     opts = parser.parse_args()
     if not large_image.tilesource.AvailableTileSources:
         large_image.tilesource.loadTileSources()
