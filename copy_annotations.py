@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import json
 import os
 import random
 import tempfile
@@ -13,8 +14,13 @@ def copy_folder(gcs, gcd, sparent, dparent):
         print('folder', sfolder['name'])
         dfolder = gcd.createFolder(
             dparent['_id'], sfolder['name'], sfolder['description'],
-            dparent['_modelType'], sfolder['public'], True,
-            sparent.get('meta', {}))
+            dparent['_modelType'], sfolder['public'], True)
+        if len(sfolder.get('meta', {})):
+            # gcd.addMetadataToFolder(dfolder['_id'], sfolder.get('meta', {}))
+            gcd.post(
+                f'folder/{dfolder["_id"]}/metadata',
+                data=json.dumps(sfolder['meta']),
+                headers={'X-HTTP-Method': 'PUT', 'Content-Type': 'application/json'})
         copy_folder(gcs, gcd, sfolder, dfolder)
     if sparent['_modelType'] != 'folder':
         return
@@ -23,7 +29,11 @@ def copy_folder(gcs, gcd, sparent, dparent):
         ditem = gcd.createItem(
             dparent['_id'], sitem['name'], sitem['description'], True)
         if len(sitem.get('meta', {})):
-            gcd.addMetadataToItem(ditem['_id'], sitem.get('meta', {}))
+            # gcd.addMetadataToItem(ditem['_id'], sitem.get('meta', {}))
+            gcd.post(
+                f'itemr/{ditem["_id"]}/metadata',
+                data=json.dumps(sitem['meta']),
+                headers={'X-HTTP-Method': 'PUT', 'Content-Type': 'application/json'})
         if len(list(gcs.listFile(sitem['_id']))) != len(list(gcd.listFile(ditem['_id']))):
             for file in gcs.listFile(sitem['_id']):
                 print('file', file['name'], file['size'])
