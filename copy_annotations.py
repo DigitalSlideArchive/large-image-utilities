@@ -9,18 +9,19 @@ import tempfile
 import girder_client.cli
 
 
-def copy_folder(gcs, gcd, sparent, dparent):
+def copy_folder(gcs, gcd, sparent, dparent):  # noqa
+    if (sparent['_modelType'] == 'folder' and dparent['_modelType'] == 'folder' and
+            len(sparent.get('meta', {}))):
+        # gcd.addMetadataToFolder(dparent['_id'], sparent.get('meta', {}))
+        gcd.post(
+            f'folder/{dparent["_id"]}/metadata',
+            data=json.dumps(sparent['meta']),
+            headers={'X-HTTP-Method': 'PUT', 'Content-Type': 'application/json'})
     for sfolder in gcs.listFolder(sparent['_id'], sparent['_modelType']):
         print('folder', sfolder['name'])
         dfolder = gcd.createFolder(
             dparent['_id'], sfolder['name'], sfolder['description'],
             dparent['_modelType'], sfolder['public'], True)
-        if len(sfolder.get('meta', {})):
-            # gcd.addMetadataToFolder(dfolder['_id'], sfolder.get('meta', {}))
-            gcd.post(
-                f'folder/{dfolder["_id"]}/metadata',
-                data=json.dumps(sfolder['meta']),
-                headers={'X-HTTP-Method': 'PUT', 'Content-Type': 'application/json'})
         copy_folder(gcs, gcd, sfolder, dfolder)
     if sparent['_modelType'] != 'folder':
         return
@@ -31,17 +32,36 @@ def copy_folder(gcs, gcd, sparent, dparent):
         if len(sitem.get('meta', {})):
             # gcd.addMetadataToItem(ditem['_id'], sitem.get('meta', {}))
             gcd.post(
-                f'itemr/{ditem["_id"]}/metadata',
+                f'item/{ditem["_id"]}/metadata',
                 data=json.dumps(sitem['meta']),
                 headers={'X-HTTP-Method': 'PUT', 'Content-Type': 'application/json'})
+        hasli = 'largeImage' in sitem and 'expected' not in sitem['largeImage']
+        setli = None
         if len(list(gcs.listFile(sitem['_id']))) != len(list(gcd.listFile(ditem['_id']))):
+            present = list(gcd.listFile(ditem['_id']))
             for file in gcs.listFile(sitem['_id']):
-                print('file', file['name'], file['size'])
-                with tempfile.TemporaryDirectory() as tmpdirname:
-                    temppath = os.path.join(tmpdirname, 'temp.tmp')
-                    gcs.downloadFile(file['_id'], temppath)
-                    gcd.uploadFileToItem(
-                        ditem['_id'], temppath, mimeType=file['mimeType'], filename=file['name'])
+                dfile = None
+                for pfile in present:
+                    if pfile['name'] == file['name'] and pfile['size'] == file['size']:
+                        dfile = pfile
+                        break
+                if dfile is None:
+                    print('file', file['name'], file['size'])
+                    with tempfile.TemporaryDirectory() as tmpdirname:
+                        temppath = os.path.join(tmpdirname, 'temp.tmp')
+                        gcs.downloadFile(file['_id'], temppath)
+                        dfile = gcd.uploadFileToItem(
+                            ditem['_id'], temppath, mimeType=file['mimeType'],
+                            filename=file['name'])
+                if hasli and file['_id'] == sitem['largeImage'].get('fileId'):
+                    setli = dfile
+        if setli:
+            ditem = gcd.createItem(
+                dparent['_id'], sitem['name'], sitem['description'], True)
+            if 'largeImage' not in ditem or ditem['largeImage'].get('fileId') != setli['_id']:
+                print('set largeImage fileId')
+                gcd.delete(f'item/{ditem["_id"]}/tiles')
+                gcd.post(f'item/{ditem["_id"]}/tiles', parameters={'fileId': setli['_id']})
         if (not len(gcs.get('annotation', parameters={'itemId': sitem['_id']})) or
                 len(gcd.get('annotation', parameters={'itemId': ditem['_id']}))):
             continue
