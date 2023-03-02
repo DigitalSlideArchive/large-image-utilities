@@ -72,7 +72,7 @@ def source_compare(sourcePath, opts):  # noqa
     sys.stdout.flush()
     canread = large_image.canReadList(sourcePath)
     large_image.cache_util.cachesClear()
-    slen = max([len(source) for source, _ in canread])
+    slen = max([len(source) for source, _ in canread] + [10])
     sys.stdout.write('Source' + ' ' * (slen - 6))
     sys.stdout.write('  Width Height')
     sys.stdout.write(' Fram')
@@ -82,7 +82,8 @@ def source_compare(sourcePath, opts):  # noqa
     sys.stdout.write('  tile f 0')
     sys.stdout.write('  tile f n')
     sys.stdout.write('\n')
-    sys.stdout.write('%s' % (' ' * slen))
+    sys.stdout.write('%s' % (' ' * (slen - 10)))
+    sys.stdout.write('mag um/pix')
     sys.stdout.write('  TileW  TileH     ')
     sys.stdout.write(' Histogram')
     sys.stdout.write(' Histogram')
@@ -176,8 +177,26 @@ def source_compare(sourcePath, opts):  # noqa
                 write_thumb(img, source, thumbs, 'tilefn', opts, styleidx)
             sys.stdout.write('\n')
 
-            sys.stdout.write('%s' % (
-                ' ' * slen if couldread else ' !canread' + ' ' * (slen - 9)))
+            if not couldread:
+                sys.stdout.write(' !canread' + (' ' * (slen - 9)))
+            else:
+                sys.stdout.write(' ' * (slen - 10))
+                sys.stdout.write('%3s ' % (
+                    ('%3.1f' % metadata['magnification'])[:3].rstrip('.')
+                    if metadata.get('magnification') else ''))
+                um = (metadata.get('mm_x', 0) or 0) * 1000
+                umstr = '      '
+                if um and um < 100:
+                    umstr = '%6.3f' % um
+                elif um:
+                    prefix = 'um kM'
+                    val = um
+                    idx = 0
+                    while val >= 10000 and idx + 1 < len(prefix):
+                        idx += 1
+                        val /= 1000
+                    umstr = '%4.0f%sm' % (val, prefix[idx])
+                sys.stdout.write(umstr)
             sys.stdout.write(' %6d %6d' % (ts.tileWidth, ts.tileHeight))
             sys.stdout.write('     ')
             sys.stdout.flush()
