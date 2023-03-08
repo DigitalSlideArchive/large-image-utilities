@@ -117,10 +117,19 @@ def copy_resource(gcs, gcd, src_path, dest_path):  # noqa
         dtop = gcd.get('resource/lookup', parameters={'path': dest_path})
     except girder_client.HttpError:
         dtop = None
-    if dtop is None and stop['_modelType'] in {'user', 'collection'}:
+    if dtop is None and stop['_modelType'] in {'user', 'collection', 'folder'}:
         dest_parts = dest_path.rstrip(os.path.sep).split(os.path.sep)
-        if len(dest_parts) == 3 and dest_parts[0] == '' and (
+        try:
+            dparent = gcd.get('resource/lookup', parameters={'path': os.path.dirname(dest_path)})
+            dtop = gcd.createFolder(
+                dparent['_id'], os.path.basename(dest_path), '',
+                dparent['_modelType'], True, True)
+        except Exception:
+            dparent = None
+            pass
+        if dparent is None and len(dest_parts) >= 3 and dest_parts[0] == '' and (
                 dest_parts[1] == 'collection' or dest_parts[1] == stop['_modelType']):
+            print('Here')
             if dest_parts[1] == 'user':
                 dtop = gcd.createUser(
                     stop['login'], stop['email'], stop['firstName'],
@@ -129,11 +138,11 @@ def copy_resource(gcs, gcd, src_path, dest_path):  # noqa
                 dtop = gcd.createCollection(stop['login'], 'From user account', False)
             else:
                 dtop = gcd.createCollection(stop['name'], stop['description'], stop['public'])
-        else:
-            dparent = gcd.get('resource/lookup', parameters={'path': os.path.dirname(dest_path)})
-            dtop = gcd.createFolder(
-                dparent['_id'], os.path.basename(dest_path), '',
-                dparent['_modelType'], True, True)
+            for part in dest_parts[3:]:
+                dparent = dtop
+                dtop = gcd.createFolder(
+                    dparent['_id'], part, '',
+                    dparent['_modelType'], True, True)
     copy_folder(gcs, gcd, stop, dtop)
 
 
