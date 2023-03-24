@@ -9,7 +9,7 @@ import tempfile
 import girder_client.cli
 
 
-def copy_folder(gcs, gcd, sparent, dparent):  # noqa
+def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
     if (sparent['_modelType'] == 'folder' and dparent['_modelType'] == 'folder' and
             len(sparent.get('meta', {}))):
         # gcd.addMetadataToFolder(dparent['_id'], sparent.get('meta', {}))
@@ -22,7 +22,7 @@ def copy_folder(gcs, gcd, sparent, dparent):  # noqa
         dfolder = gcd.createFolder(
             dparent['_id'], sfolder['name'], sfolder['description'],
             dparent['_modelType'], sfolder['public'], True)
-        copy_folder(gcs, gcd, sfolder, dfolder)
+        copy_folder(gcs, gcd, sfolder, dfolder, opts)
     if sparent['_modelType'] != 'folder':
         return
     for sitem in gcs.listItem(sparent['_id']):
@@ -62,6 +62,8 @@ def copy_folder(gcs, gcd, sparent, dparent):  # noqa
                 print('set largeImage fileId')
                 gcd.delete(f'item/{ditem["_id"]}/tiles')
                 gcd.post(f'item/{ditem["_id"]}/tiles', parameters={'fileId': setli['_id']})
+        if opts.replace and len(gcd.get('annotation', parameters={'itemId': ditem['_id']})):
+            gcd.delete(f'annotation/item/{ditem["_id"]}')
         if (not len(gcs.get('annotation', parameters={'itemId': sitem['_id']})) or
                 len(gcd.get('annotation', parameters={'itemId': ditem['_id']}))):
             continue
@@ -84,16 +86,17 @@ def copy_data(opts):
     gcd = girder_client.cli.GirderCli(
         apiUrl=opts.dest_api, username=opts.dest_user, password=opts.dest_password)
     gcd.progressReporterCls = girder_client._NoopProgressReporter
-    copy_resource(gcs, gcd, opts.src_path, opts.dest_path)
+    copy_resource(gcs, gcd, opts.src_path, opts.dest_path, opts)
 
 
-def copy_resource(gcs, gcd, src_path, dest_path):  # noqa
+def copy_resource(gcs, gcd, src_path, dest_path, opts):  # noqa
     if dest_path.split(os.path.sep)[-1] == '.':
         dest_path = os.path.sep.join(
             dest_path.split(os.path.sep)[:-1] + src_path.split(os.path.sep)[-1:])
     if src_path == '/':
         for path in ['user', 'collection']:
-            copy_resource(gcs, gcd, os.path.join(src_path, path), os.path.join(dest_path, path))
+            copy_resource(
+                gcs, gcd, os.path.join(src_path, path), os.path.join(dest_path, path), opts)
     if src_path.rstrip('/') in {'/user', '/collection'}:
         try:
             gcd.get('resource/lookup', parameters={'path': dest_path})
@@ -106,12 +109,12 @@ def copy_resource(gcs, gcd, src_path, dest_path):  # noqa
         for user in gcs.listUser():
             user_path = gcs.get(f'resource/{user["_id"]}/path', parameters={'type': 'user'})
             copy_resource(gcs, gcd, user_path, os.path.join(
-                dest_path, user_path.split(os.path.sep)[-1]))
+                dest_path, user_path.split(os.path.sep)[-1]), opts)
     if src_path.rstrip('/') == '/collection':
         for coll in gcs.listCollection():
             coll_path = gcs.get(f'resource/{coll["_id"]}/path', parameters={'type': 'collection'})
             copy_resource(gcs, gcd, coll_path, os.path.join(
-                dest_path, coll_path.split(os.path.sep)[-1]))
+                dest_path, coll_path.split(os.path.sep)[-1]), opts)
     stop = gcs.get('resource/lookup', parameters={'path': src_path})
     try:
         dtop = gcd.get('resource/lookup', parameters={'path': dest_path})
@@ -143,7 +146,7 @@ def copy_resource(gcs, gcd, src_path, dest_path):  # noqa
                 dtop = gcd.createFolder(
                     dparent['_id'], part, '',
                     dparent['_modelType'], True, True)
-    copy_folder(gcs, gcd, stop, dtop)
+    copy_folder(gcs, gcd, stop, dtop, opts)
 
 
 if __name__ == '__main__':
@@ -157,6 +160,7 @@ if __name__ == '__main__':
     parser.add_argument('--src-password', help='Source password.')
     parser.add_argument('--dest-password', help='Destination password.')
     parser.add_argument('--src-path', help='Source resource path.')
+    parser.add_argument('--replace', action='store_true', help='Replace all annotations.')
     parser.add_argument(
         '--dest-path', help='Destination resource path.  If the last '
         'component of this is ".", it is taken from the last component of '
