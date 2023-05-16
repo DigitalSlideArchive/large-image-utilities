@@ -23,6 +23,10 @@ def command():  # noqa
     f2 = open(opts.file2)
     source1 = None
     source2 = None
+    # style1 = None
+    # style2 = None
+    # projection1 = None
+    # projection2 = None
     line1 = None
     line2 = None
     diffsource = None
@@ -57,6 +61,30 @@ def command():  # noqa
             even = True
         if line2.startswith('Source '):
             source2 = lastline2
+            sys.stdout.write(''.join(diff1) + ''.join(diff2))
+            diff1 = []
+            diff2 = []
+            diffsource = None
+        if line1.startswith('Style: '):
+            # style1 = lastline1
+            sys.stdout.write(''.join(diff1) + ''.join(diff2))
+            diff1 = []
+            diff2 = []
+            diffsource = None
+        if line2.startswith('Style: '):
+            # style2 = lastline2
+            sys.stdout.write(''.join(diff1) + ''.join(diff2))
+            diff1 = []
+            diff2 = []
+            diffsource = None
+        if line1.startswith('Projection: '):
+            # projection1 = lastline1
+            sys.stdout.write(''.join(diff1) + ''.join(diff2))
+            diff1 = []
+            diff2 = []
+            diffsource = None
+        if line2.startswith('Projection: '):
+            # projection2 = lastline2
             sys.stdout.write(''.join(diff1) + ''.join(diff2))
             diff1 = []
             diff2 = []

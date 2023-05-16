@@ -2,6 +2,7 @@
 
 import argparse
 import glob
+import itertools
 import math
 import os
 import pprint
@@ -9,6 +10,7 @@ import sys
 import time
 
 import large_image
+import numpy
 
 os.environ['GDAL_PAM_ENABLED'] = 'NO'
 os.environ['CPL_LOG'] = os.devnull
@@ -31,12 +33,13 @@ def histotext(h, maxchan=None):
     return result
 
 
-def write_thumb(img, source, prefix, name, opts=None, idx=None):
+def write_thumb(img, source, prefix, name, opts=None, idx=None, idx2=None):
     if not prefix or not img:
         return
     ext = 'jpg' if not opts or not opts.encoding else opts.encoding.lower()
     idxStr = '' if not idx else '-%s' % str(idx)
-    path = '%s-%s-%s%s.%s' % (prefix, name, source, idxStr, ext)
+    idx2Str = '' if not idx2 and not idx else '-%s' % str(idx2)
+    path = '%s-%s-%s%s%s.%s' % (prefix, name, source, idxStr, idx2Str, ext)
     open(path, 'wb').write(img)
 
 
@@ -84,7 +87,8 @@ def source_compare(sourcePath, opts):  # noqa
     sys.stdout.write('\n')
     sys.stdout.write('%s' % (' ' * (slen - 10)))
     sys.stdout.write('mag um/pix')
-    sys.stdout.write('  TileW  TileH     ')
+    sys.stdout.write('  TileW  TileH')
+    sys.stdout.write(' dtyp')
     sys.stdout.write(' Histogram')
     sys.stdout.write(' Histogram')
     sys.stdout.write(' Histogram' if opts.full else '          ')
@@ -103,16 +107,27 @@ def source_compare(sourcePath, opts):  # noqa
     if opts.encoding:
         kwargs['encoding'] = opts.encoding
     styles = [None if val == '' else val for val in (opts.style or [None])]
-    for styleidx, style in enumerate(styles):
+    projections = [None if val == '' else val for val in (opts.projection or [None])]
+    for (styleidx, style), (projidx, projection) in itertools.product(
+            enumerate(styles), enumerate(projections)):
         kwargs['style'] = style
         if style is None:
             kwargs.pop('style', None)
         if len(styles) > 1:
             sys.stdout.write('Style: %s\n' % (str(style)[:72]))
+        kwargs['projection'] = projection
+        if projection is None:
+            kwargs.pop('projection', None)
+        if len(projections) > 1:
+            sys.stdout.write('Projection: %s\n' % (str(projection)[:72]))
         for source, couldread in canread:
             if getattr(opts, 'skipsource', None) and source in opts.skipsource:
                 continue
             if getattr(opts, 'usesource', None) and source not in opts.usesource:
+                continue
+            if projection and not getattr(
+                    large_image.tilesource.AvailableTileSources[source],
+                    '_geospatial_source', None):
                 continue
             sys.stdout.write('%s' % (source + ' ' * (slen - len(source))))
             sys.stdout.flush()
@@ -149,32 +164,32 @@ def source_compare(sourcePath, opts):  # noqa
             thumbtime = time.time() - t
             sys.stdout.write(' %8.3fs' % thumbtime)
             sys.stdout.flush()
-            write_thumb(img[0], source, thumbs, 'thumbnail', opts, styleidx)
+            write_thumb(img[0], source, thumbs, 'thumbnail', opts, styleidx, projidx)
             t = time.time()
             img = ts.getTile(0, 0, 0, sparseFallback=True)
             tile0time = time.time() - t
             sys.stdout.write(' %8.3fs' % tile0time)
             sys.stdout.flush()
-            write_thumb(img, source, thumbs, 'tile0', opts, styleidx)
+            write_thumb(img, source, thumbs, 'tile0', opts, styleidx, projidx)
             t = time.time()
             img = ts.getTile(hx, hy, levels - 1, sparseFallback=True)
             tilentime = time.time() - t
             sys.stdout.write(' %8.3fs' % tilentime)
             sys.stdout.flush()
-            write_thumb(img, source, thumbs, 'tilen', opts, styleidx)
+            write_thumb(img, source, thumbs, 'tilen', opts, styleidx, projidx)
             if frames > 1:
                 t = time.time()
                 img = ts.getTile(0, 0, 0, frame=frames - 1, sparseFallback=True)
                 tilef0time = time.time() - t
                 sys.stdout.write(' %8.3fs' % tilef0time)
                 sys.stdout.flush()
-                write_thumb(img, source, thumbs, 'tilef0', opts, styleidx)
+                write_thumb(img, source, thumbs, 'tilef0', opts, styleidx, projidx)
                 t = time.time()
                 img = ts.getTile(hx, hy, levels - 1, frame=frames - 1, sparseFallback=True)
                 tilefntime = time.time() - t
                 sys.stdout.write(' %8.3fs' % tilefntime)
                 sys.stdout.flush()
-                write_thumb(img, source, thumbs, 'tilefn', opts, styleidx)
+                write_thumb(img, source, thumbs, 'tilefn', opts, styleidx, projidx)
             sys.stdout.write('\n')
 
             if not couldread:
@@ -198,7 +213,10 @@ def source_compare(sourcePath, opts):  # noqa
                     umstr = '%4.0f%sm' % (val, prefix[idx])
                 sys.stdout.write(umstr)
             sys.stdout.write(' %6d %6d' % (ts.tileWidth, ts.tileHeight))
-            sys.stdout.write('     ')
+            if hasattr(ts, 'dtype'):
+                sys.stdout.write(' %4s' % numpy.dtype(ts.dtype).str.lstrip('|').lstrip('<')[:4])
+            else:
+                sys.stdout.write('     ')
             sys.stdout.flush()
 
             h = ts.histogram(onlyMinMax=True, output=dict(maxWidth=2048, maxHeight=2048))
@@ -259,7 +277,7 @@ def source_compare(sourcePath, opts):  # noqa
                 sys.stdout.write(pprint.pformat(ts.getAssociatedImagesList()).strip() + '\n')
                 for assoc in ts.getAssociatedImagesList():
                     img = ts.getAssociatedImage(assoc, **kwargs)
-                    write_thumb(img[0], source, thumbs, 'assoc-%s' % assoc, opts, styleidx)
+                    write_thumb(img[0], source, thumbs, 'assoc-%s' % assoc, opts, styleidx, projidx)
 
 
 def command():
@@ -304,11 +322,14 @@ def command():
         help='List associated images from the file.')
     parser.add_argument(
         '--encoding', help='Optional encoding for tiles (e.g., PNG)')
+    # TODO append this to a list to allow multiple encodings tested
     parser.add_argument(
         '--style', action='append',
         help='Use the json style when testing.  Can be specified multiple times.')
-    # TODO append this to a list to allow multiple encodings tested
-    # TODO add projection to add a list of projections to test
+    parser.add_argument(
+        '--projection', action='append',
+        help='Use the projection when testing.  Can be specified multiple '
+        'times.  EPSG:3857 is a common choice.')
     # TODO add a flag to skip non-geospatial sources if a projection is used
     opts = parser.parse_args()
     if not large_image.tilesource.AvailableTileSources:
