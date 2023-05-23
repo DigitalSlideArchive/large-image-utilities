@@ -9,7 +9,7 @@ import tempfile
 import tifftools
 
 
-def adjust_ifds(ifds, tmpfile, lenlist, compression):
+def adjust_ifds(ifds, tmpfile, lenlist, compression):  # noqa
     for ifd in ifds:
         maxlen = 0
         uncomplen = None
@@ -31,13 +31,22 @@ def adjust_ifds(ifds, tmpfile, lenlist, compression):
             counts = ifd['tags'][tifftools.Tag.StripByteCounts.value]
             w = ifd['tags'][tifftools.Tag.ImageWidth.value]['data'][0]
             h = ifd['tags'][tifftools.Tag.RowsPerStrip.value]['data'][0]
+            h2 = ifd['tags'][tifftools.Tag.ImageLength.value]['data'][0] - (
+                ifd['tags'][tifftools.Tag.ImageLength.value]['data'][0] // h) * h or h
         if tifftools.Tag.TileOffsets.value in ifd['tags']:
             off = ifd['tags'][tifftools.Tag.TileOffsets.value]
             counts = ifd['tags'][tifftools.Tag.TileByteCounts.value]
             w = ifd['tags'][tifftools.Tag.TileWidth.value]['data'][0]
             h = ifd['tags'][tifftools.Tag.TileLength.value]['data'][0]
+            h2 = h
         if off:
             bps = sum(ifd['tags'][tifftools.Tag.BitsPerSample.value]['data'])
+            if tifftools.Tag.Compression.value not in ifd['tags']:
+                ifd['tags'][tifftools.Tag.Compression.value] = {
+                    'datatype': tifftools.Datatype.SHORT,
+                    'count': 1,
+                    'data': [0],
+                }
             ifd['tags'][tifftools.Tag.Compression.value]['data'][0] = \
                 tifftools.constants.Compression['None'].value
             bytesperchunk = int(math.ceil(w * bps / 8)) * h
@@ -49,6 +58,17 @@ def adjust_ifds(ifds, tmpfile, lenlist, compression):
             counts['data'] = [bytesperchunk] * len(counts['data'])
             off['data'] = [sum(v[0] for v in lenlist)] * len(off['data'])
             maxlen = max(maxlen, bytesperchunk)
+            if h2 and h2 != h:
+                if len(off['data']) > 1:
+                    lenlist.append((maxlen, uncomplen))
+                    maxlen = 0
+                bytesperchunk = int(math.ceil(w * bps / 8)) * h2
+                if compression == 'packbits':
+                    uncomplen = bytesperchunk
+                    bytesperchunk = (uncomplen + 127) // 128 * 2
+                maxlen = max(maxlen, bytesperchunk)
+                counts['data'][-1] = bytesperchunk
+                off['data'][-1] = sum(v[0] for v in lenlist)
         ifd['path_or_fobj'] = tmpfile
         ifd['size'] = sum(v[0] for v in lenlist) + maxlen
         if maxlen:
@@ -154,7 +174,10 @@ def main(sourceName, destName, compression):  # noqa
                 val = tag.groups()[7]
                 if "' ..." in val:
                     val = val.rsplit("' ...")[0] + "'"
-                record['data'] = ast.literal_eval(val)
+                if val[:1] == "'":
+                    record['data'] = ast.literal_eval(val)
+                else:
+                    record['data'] = [int(v) for v in val.split(' ') if v != '...']
             else:
                 count = record['count'] * (2 if 'RATIONAL' in tag.groups()[4] else 1)
                 data = [float(v) if tag.groups()[4] in {'FLOAT', 'DOUBLE'} else int(v)
