@@ -66,6 +66,8 @@ def main(opts):
                       for source in opts.source
                       for sourcePath in sorted(glob.glob(source))
                       ])
+    sources += sorted([source for source in opts.source
+                       if source.startswith('https://') or source.startswith('http://')])
     for sourcePath in sources:
         source_compare(sourcePath, opts)
 
@@ -145,8 +147,28 @@ def source_compare(sourcePath, opts):  # noqa
             metadata = ts.getMetadata()
             frames = len(metadata.get('frames', [])) or 1
             levels = metadata['levels']
+            tx0 = ty0 = tz0 = 0
             hx = ts.sizeX // ts.tileWidth // 2
             hy = ts.sizeY // ts.tileHeight // 2
+            if projection and 'bounds' in metadata:
+                kwargs['region'] = dict(
+                    left=metadata['bounds']['xmin'],
+                    top=metadata['bounds']['ymin'],
+                    right=metadata['bounds']['xmax'],
+                    bottom=metadata['bounds']['ymax'],
+                    units='projection')
+                grb = ts._getRegionBounds(metadata, **kwargs.get('region', {}))
+                for level in range(metadata['levels']):
+                    if (((grb[0] + 1) // 2 ** level // metadata['tileWidth'] ==
+                         grb[2] // 2 ** level // metadata['tileWidth']) and
+                        ((grb[1] + 1) // 2 ** level // metadata['tileHeight'] ==
+                         grb[3] // 2 ** level // metadata['tileHeight'])):
+                        tz0 = metadata['levels'] - 1 - level
+                        tx0 = grb[0] // 2 ** level // metadata['tileWidth']
+                        ty0 = grb[1] // 2 ** level // metadata['tileWidth']
+                        hx = (grb[0] + grb[2]) // 2 // metadata['tileWidth']
+                        hy = (grb[1] + grb[3]) // 2 // metadata['tileWidth']
+                        break
             sys.stdout.write('%5d' % frames)
             sys.stdout.flush()
             t = time.time()
@@ -166,7 +188,7 @@ def source_compare(sourcePath, opts):  # noqa
             sys.stdout.flush()
             write_thumb(img[0], source, thumbs, 'thumbnail', opts, styleidx, projidx)
             t = time.time()
-            img = ts.getTile(0, 0, 0, sparseFallback=True)
+            img = ts.getTile(tx0, ty0, tz0, sparseFallback=True)
             tile0time = time.time() - t
             sys.stdout.write(' %8.3fs' % tile0time)
             sys.stdout.flush()
@@ -219,46 +241,54 @@ def source_compare(sourcePath, opts):  # noqa
                 sys.stdout.write('     ')
             sys.stdout.flush()
 
-            h = ts.histogram(onlyMinMax=True, output=dict(maxWidth=2048, maxHeight=2048))
+            # get maxval for other histograms
+            h = ts.histogram(onlyMinMax=True, output=dict(maxWidth=2048, maxHeight=2048), **kwargs)
             maxval = max(h['max'].tolist())
             maxval = 2 ** (int((math.log(maxval or 1) / math.log(2))) + 1) if maxval > 1 else 1
-
-            h = ts.histogram(bins=9, output=dict(maxWidth=256, maxHeight=256), range=[0, maxval])
+            # thumbnail histogram
+            h = ts.histogram(bins=9, output=dict(maxWidth=256, maxHeight=256),
+                             range=[0, maxval], **kwargs)
             maxchan = len(h['histogram'])
             if maxchan == 4:
                 maxchan = 3
             sys.stdout.write(' %s' % histotext(h, maxchan))
             sys.stdout.flush()
-            h = ts.histogram(bins=9, output=dict(maxWidth=2048, maxHeight=2048), range=[0, maxval])
+            # full image histogram
+            h = ts.histogram(bins=9, output=dict(maxWidth=2048, maxHeight=2048),
+                             range=[0, maxval], **kwargs)
             sys.stdout.write(' %s' % histotext(h, maxchan))
             sys.stdout.flush()
             if opts.full:
-                h = ts.histogram(bins=9, range=[0, maxval])
+                # at full res
+                h = ts.histogram(bins=9, range=[0, maxval], **kwargs)
                 sys.stdout.write(' %s' % histotext(h, maxchan))
                 sys.stdout.flush()
             else:
                 sys.stdout.write(' %s' % (' ' * 9))
             if frames > 1:
+                # last frame full image histogram
                 h = ts.histogram(
                     bins=9, output=dict(maxWidth=2048, maxHeight=2048),
-                    range=[0, maxval], frame=frames - 1)
+                    range=[0, maxval], frame=frames - 1, **kwargs)
                 sys.stdout.write(' %s' % histotext(h, maxchan))
                 sys.stdout.flush()
                 if opts.full:
-                    h = ts.histogram(bins=9, range=[0, maxval], frame=frames - 1)
+                    # at full res
+                    h = ts.histogram(bins=9, range=[0, maxval], frame=frames - 1, **kwargs)
                     sys.stdout.write(' %s' % histotext(h, maxchan))
                     sys.stdout.flush()
                 else:
                     sys.stdout.write(' %s' % (' ' * 9))
             sys.stdout.write('\n')
             if opts.histlevels:
+                # histograms at all levels aon the first and last frames
                 for f in range(0, frames, (frames - 1) or 1):
                     for ll in range(levels):
                         t = -time.time()
                         h = ts.histogram(bins=32, output=dict(
                             maxWidth=int(math.ceil(ts.sizeX / 2 ** (levels - 1 - ll))),
                             maxHeight=int(math.ceil(ts.sizeY / 2 ** (levels - 1 - ll)))
-                        ), range=[0, maxval], frame=f)
+                        ), range=[0, maxval], frame=f, **kwargs)
                         t += time.time()
                         sys.stdout.write('%3d%5d %s' % (ll, f, histotext(h, maxchan)))
                         sys.stdout.write(' %s %s %s %s' % (
@@ -308,7 +338,7 @@ def command():
         help='All sources to read all files.  Otherwise, some sources avoid '
         'some files based on name.')
     parser.add_argument(
-        '--thumbs', type=str, required=False,
+        '--thumbs', '--thumbnails', type=str, required=False,
         help='Location to write thumbnails of results.  If this is not an '
         'existing directory, it is a prefix for the resultant files.')
     parser.add_argument(
