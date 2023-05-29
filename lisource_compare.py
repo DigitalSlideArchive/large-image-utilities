@@ -3,6 +3,7 @@
 import argparse
 import glob
 import itertools
+import logging
 import math
 import os
 import pprint
@@ -361,7 +362,14 @@ def command():
         help='Use the projection when testing.  Can be specified multiple '
         'times.  EPSG:3857 is a common choice.')
     # TODO add a flag to skip non-geospatial sources if a projection is used
+    parser.add_argument(
+        '--verbose', '-v', action='count', default=0, help='Increase verbosity')
+    parser.add_argument(
+        '--silent', '-s', action='count', default=0, help='Decrease verbosity')
     opts = parser.parse_args()
+    li_logger = large_image.config.getConfig('logger')
+    li_logger.setLevel(max(1, logging.CRITICAL - (opts.verbose - opts.silent) * 10))
+    li_logger.addHandler(logging.StreamHandler(sys.stderr))
     if not large_image.tilesource.AvailableTileSources:
         large_image.tilesource.loadTileSources()
     if opts.all:
