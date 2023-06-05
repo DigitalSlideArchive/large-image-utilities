@@ -172,7 +172,11 @@ if __name__ == '__main__':  # noqa
     print('%d field(s) of metadata' % (len(fields), ))
     if args.count and args.source:
         create_items(client, args.source, args.count, args.folder, fake)
+    # buffer the items; otherwise their order changes as we go
+    items = []
     for item in client.listResource('item', {'folderId': args.folder, 'sort': 'updated'}):
+        items.append(item)
+    for item in items:
         print(item['name'])
         try:
             limetadata = client.get('item/%s/tiles' % item['_id'])
