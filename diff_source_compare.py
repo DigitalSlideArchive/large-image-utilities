@@ -17,7 +17,7 @@ def parse_file(path):
         source = None
         style = None
         projection = None
-        entry = {'sources': {}}
+        entry = {'sources': {}, 'first': {}}
         for line in fptr:
             if line.startswith('Source '):
                 if source:
@@ -27,7 +27,7 @@ def parse_file(path):
                 source = None
                 if lastline:
                     src = lastline
-                entry = {'header1': line, 'sources': {}}
+                entry = {'header1': line, 'sources': {}, 'first': {}}
             elif line.startswith('mag '):
                 entry['header2'] = line
             elif line.startswith('Style: '):
@@ -39,8 +39,10 @@ def parse_file(path):
                 entry['sources'][(style, projection, source)] = {'line1': line}
             else:
                 entry['sources'][(style, projection, source)]['line2'] = line
+                if re.search(r'\d{9} \d{9}', line) and not (style, projection) in entry['first']:
+                    entry['first'][(style, projection)] = source
             lastline = line
-        if src and len(entry):
+        if src:
             records[src] = entry
     return records
 
@@ -67,10 +69,28 @@ def command():  # noqa
             continue
         sources = set(source1[record]['sources']) | set(source2[record]['sources'])
         lastprint = None
+        if ([e[-1] for e in source1[record]['sources']] !=
+                [e[-1] for e in source2[record]['sources']]):
+            print(' %s' % record.strip())
+            lastprint = False
+            print('<order: ' + ','.join(e[-1] for e in source1[record]['sources']))
+            print('>order: ' + ','.join(e[-1] for e in source2[record]['sources']))
+        firsts = set(source1[record]['first']) | set(source2[record]['first'])
+        for style, projection in sorted(firsts):
+            if (source1[record]['first'].get((style, projection)) !=
+                    source2[record]['first'].get((style, projection))):
+                if lastprint is None:
+                    print(' %s' % record.strip())
+                    lastprint = False
+                    if style is not None:
+                        print(' %s' % style.rstrip())
+                    if projection is not None:
+                        print(' %s' % projection.rstrip())
+                    print('<first: ' + source1[record]['first'].get((style, projection)))
+                    print('>first: ' + source2[record]['first'].get((style, projection)))
         for style, projection, source in sorted(sources):
             s1 = source1[record]['sources'].get((style, projection, source))
             s2 = source2[record]['sources'].get((style, projection, source))
-            # print(s1, s2)
             diff = s1 is None or s2 is None
             if not diff:
                 parts11 = s1['line1'].split()
@@ -92,7 +112,8 @@ def command():  # noqa
                                     diff = True
             if diff:
                 if not lastprint:
-                    print(' %s' % record.strip())
+                    if lastprint is not False:
+                        print(' %s' % record.strip())
                     print(' %s' % source1[record]['header1'].rstrip())
                     print(' %s' % source1[record]['header2'].rstrip())
                     lastprint = [-1, -1]

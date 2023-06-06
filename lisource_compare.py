@@ -145,7 +145,17 @@ def source_compare(sourcePath, opts):  # noqa
                 continue
             sys.stdout.write(' %6d %6d' % (ts.sizeX, ts.sizeY))
             sys.stdout.flush()
-            metadata = ts.getMetadata()
+            try:
+                metadata = ts.getMetadata()
+            except Exception as exp:
+                sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
+                sexp = sexp.replace(sourcePath, '<path>')
+                sys.stdout.write(' %s\n' % sexp[:64 - slen])
+                sys.stdout.write('%s %s\n' % (
+                    ' ' * slen if not couldread else ' canread' + ' ' * (slen - 8),
+                    sexp[59 - slen: (59 - slen) + (78 - slen)]))
+                sys.stdout.flush()
+                continue
             frames = len(metadata.get('frames', [])) or 1
             levels = metadata['levels']
             tx0 = ty0 = tz0 = 0
