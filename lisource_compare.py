@@ -82,21 +82,21 @@ def source_compare(sourcePath, opts):  # noqa
     sys.stdout.write('Source' + ' ' * (slen - 6))
     sys.stdout.write('  Width Height')
     sys.stdout.write(' Fram')
+    sys.stdout.write(' popL')
     sys.stdout.write(' thumbnail')
     sys.stdout.write('    tile 0')
     sys.stdout.write('    tile n')
-    sys.stdout.write('  tile f 0')
-    sys.stdout.write('  tile f n')
+    sys.stdout.write(' tile f 0n')
     sys.stdout.write('\n')
     sys.stdout.write('%s' % (' ' * (slen - 10)))
     sys.stdout.write('mag um/pix')
     sys.stdout.write('  TileW  TileH')
     sys.stdout.write(' dtyp')
+    sys.stdout.write(' aImg')
     sys.stdout.write(' Histogram')
     sys.stdout.write(' Histogram')
     sys.stdout.write(' Histogram' if opts.full else '          ')
     sys.stdout.write(' Histogram')
-    sys.stdout.write(' Histogram' if opts.full else '          ')
     sys.stdout.write('\n')
     if opts.histlevels:
         sys.stdout.write('Lvl Fram Histogram                       ')
@@ -143,11 +143,11 @@ def source_compare(sourcePath, opts):  # noqa
                 sys.stdout.write('%s %s\n' % (' ' * slen, sexp[78 - slen: 2 * (78 - slen)]))
                 sys.stdout.flush()
                 continue
-            sys.stdout.write(' %6d %6d' % (ts.sizeX, ts.sizeY))
-            sys.stdout.flush()
+            sizeX, sizeY = ts.sizeX, ts.sizeY
             try:
                 metadata = ts.getMetadata()
             except Exception as exp:
+                sys.stdout.write(' %6d %6d' % (sizeX, sizeY))
                 sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
                 sexp = sexp.replace(sourcePath, '<path>')
                 sys.stdout.write(' %s\n' % sexp[:64 - slen])
@@ -170,17 +170,24 @@ def source_compare(sourcePath, opts):  # noqa
                     units='projection')
                 grb = ts._getRegionBounds(metadata, **kwargs.get('region', {}))
                 for level in range(metadata['levels']):
-                    if (((grb[0] + 1) // 2 ** level // metadata['tileWidth'] ==
-                         grb[2] // 2 ** level // metadata['tileWidth']) and
-                        ((grb[1] + 1) // 2 ** level // metadata['tileHeight'] ==
-                         grb[3] // 2 ** level // metadata['tileHeight'])):
+                    if (((grb[0] + 1) // 2 ** level // ts.tileWidth ==
+                         grb[2] // 2 ** level // ts.tileWidth) and
+                        ((grb[1] + 1) // 2 ** level // ts.tileHeight ==
+                         grb[3] // 2 ** level // ts.tileHeight)):
                         tz0 = metadata['levels'] - 1 - level
-                        tx0 = grb[0] // 2 ** level // metadata['tileWidth']
-                        ty0 = grb[1] // 2 ** level // metadata['tileWidth']
-                        hx = (grb[0] + grb[2]) // 2 // metadata['tileWidth']
-                        hy = (grb[1] + grb[3]) // 2 // metadata['tileWidth']
+                        tx0 = grb[0] // 2 ** level // ts.tileWidth
+                        ty0 = grb[1] // 2 ** level // ts.tileHeight
+                        hx = (grb[0] + grb[2]) // 2 // ts.tileWidth
+                        hy = (grb[1] + grb[3]) // 2 // ts.tileHeight
+                        sizeX = grb[2] - grb[0]
+                        sizeY = grb[3] - grb[1]
                         break
-            sys.stdout.write('%5d' % frames)
+            sys.stdout.write(' %6d %6d' % (sizeX, sizeY))
+            sys.stdout.write(' %4d' % frames)
+            if hasattr(ts, '_populatedLevels'):
+                sys.stdout.write(' %4d' % ts._populatedLevels)
+            else:
+                sys.stdout.write('     ')
             sys.stdout.flush()
             t = time.time()
             try:
@@ -214,13 +221,11 @@ def source_compare(sourcePath, opts):  # noqa
                 t = time.time()
                 img = ts.getTile(0, 0, 0, frame=frames - 1, sparseFallback=True)
                 tilef0time = time.time() - t
-                sys.stdout.write(' %8.3fs' % tilef0time)
-                sys.stdout.flush()
                 write_thumb(img, source, thumbs, 'tilef0', opts, styleidx, projidx)
                 t = time.time()
                 img = ts.getTile(hx, hy, levels - 1, frame=frames - 1, sparseFallback=True)
                 tilefntime = time.time() - t
-                sys.stdout.write(' %8.3fs' % tilefntime)
+                sys.stdout.write(' %8.3fs' % (tilef0time + tilefntime))
                 sys.stdout.flush()
                 write_thumb(img, source, thumbs, 'tilefn', opts, styleidx, projidx)
             sys.stdout.write('\n')
@@ -251,6 +256,22 @@ def source_compare(sourcePath, opts):  # noqa
             else:
                 sys.stdout.write('     ')
             sys.stdout.flush()
+            try:
+                allist = ts.getAssociatedImagesList()
+                alnames = ''
+                for alkey in ['label', 'macro']:
+                    if alkey in allist:
+                        alnames += alkey[:1]
+                if len(alnames):
+                    sys.stdout.write(' %s%*d' % (
+                        alnames + ' ' if alnames else '',
+                        4 - (len(alnames) + 1 if alnames else 0),
+                        len(allist)))
+                else:
+                    sys.stdout.write('     ')
+            except Exception:
+                sys.stdout.write(' fail')
+            sys.stdout.flush()
 
             # get maxval for other histograms
             h = ts.histogram(onlyMinMax=True, output=dict(maxWidth=2048, maxHeight=2048), **kwargs)
@@ -278,21 +299,19 @@ def source_compare(sourcePath, opts):  # noqa
                 sys.stdout.write(' %s' % (' ' * 9))
             if frames > 1:
                 # last frame full image histogram
-                h = ts.histogram(
-                    bins=9, output=dict(maxWidth=2048, maxHeight=2048),
-                    range=[0, maxval], frame=frames - 1, **kwargs)
-                sys.stdout.write(' %s' % histotext(h, maxchan))
-                sys.stdout.flush()
-                if opts.full:
+                if not opts.full:
+                    h = ts.histogram(
+                        bins=9, output=dict(maxWidth=2048, maxHeight=2048),
+                        range=[0, maxval], frame=frames - 1, **kwargs)
+                    sys.stdout.write(' %s' % histotext(h, maxchan))
+                else:
                     # at full res
                     h = ts.histogram(bins=9, range=[0, maxval], frame=frames - 1, **kwargs)
                     sys.stdout.write(' %s' % histotext(h, maxchan))
-                    sys.stdout.flush()
-                else:
-                    sys.stdout.write(' %s' % (' ' * 9))
+                sys.stdout.flush()
             sys.stdout.write('\n')
             if opts.histlevels:
-                # histograms at all levels aon the first and last frames
+                # histograms at all levels on the first and last frames
                 for f in range(0, frames, (frames - 1) or 1):
                     for ll in range(levels):
                         t = -time.time()
