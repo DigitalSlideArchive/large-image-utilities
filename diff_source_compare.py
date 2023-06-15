@@ -34,7 +34,7 @@ def parse_file(path):
                 style = line
             elif line.startswith('Projection: '):
                 projection = line
-            elif line[:1] != ' ' and line[:1] > '9':
+            elif line[:1] != ' ' and (line[:1] < '0' or line[:1] > '9') and line[:1] != '':
                 source = line.split()[0]
                 entry['sources'][(style, projection, source)] = {'line1': line}
             else:
@@ -86,8 +86,8 @@ def command():  # noqa
                         print(' %s' % style.rstrip())
                     if projection is not None:
                         print(' %s' % projection.rstrip())
-                    print('<first: ' + source1[record]['first'].get((style, projection)))
-                    print('>first: ' + source2[record]['first'].get((style, projection)))
+                    print('<first: ' + (source1[record]['first'].get((style, projection)) or ''))
+                    print('>first: ' + (source2[record]['first'].get((style, projection)) or ''))
         for style, projection, source in sorted(sources):
             s1 = source1[record]['sources'].get((style, projection, source))
             s2 = source2[record]['sources'].get((style, projection, source))
@@ -101,8 +101,8 @@ def command():  # noqa
                     diff = diff or len(parts1) != len(parts2)
                     for idx in range(min(len(parts1), len(parts2))):
                         if parts1[idx] != parts2[idx]:
-                            if (not re.match(r'\d+\.\d+s', parts1[idx]) or
-                                    not re.match(r'\d+\.\d+s', parts2[idx])):
+                            if (not re.match(r'\d*\.\d+s', parts1[idx]) or
+                                    not re.match(r'\d*\.\d+s', parts2[idx])):
                                 diff = True
                             else:
                                 time1 = float(parts1[idx][:-1])

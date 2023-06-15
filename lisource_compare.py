@@ -27,6 +27,10 @@ def histotext(h, maxchan=None):
             for idx, val in enumerate(entry['hist'].tolist()):
                 hist[idx] += val
     maxval = max(hist) or 1
+    # scale up based on the second largest value if it is small compared to
+    # the largest value
+    secondmax = sorted(hist)[-2]
+    maxval = min(maxval, secondmax * 1.5 if secondmax else maxval)
     result = ''
     for val in hist:
         scale = int(min(len(ctbl) - 1, math.floor(len(ctbl) * val / maxval)))
@@ -82,7 +86,8 @@ def source_compare(sourcePath, opts):  # noqa
     sys.stdout.write('Source' + ' ' * (slen - 6))
     sys.stdout.write('  Width Height')
     sys.stdout.write(' Fram')
-    sys.stdout.write(' popL')
+    sys.stdout.write(' Axes')
+    sys.stdout.write(' open')
     sys.stdout.write(' thumbnail')
     sys.stdout.write('    tile 0')
     sys.stdout.write('    tile n')
@@ -92,6 +97,7 @@ def source_compare(sourcePath, opts):  # noqa
     sys.stdout.write('mag um/pix')
     sys.stdout.write('  TileW  TileH')
     sys.stdout.write(' dtyp')
+    sys.stdout.write(' popL')
     sys.stdout.write(' aImg')
     sys.stdout.write(' Histogram')
     sys.stdout.write(' Histogram')
@@ -135,7 +141,9 @@ def source_compare(sourcePath, opts):  # noqa
             sys.stdout.write('%s' % (source + ' ' * (slen - len(source))))
             sys.stdout.flush()
             try:
+                t = time.time()
                 ts = large_image.tilesource.AvailableTileSources[source](sourcePath, **kwargs)
+                opentime = time.time() - t
             except Exception as exp:
                 sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
                 sexp = sexp.replace(sourcePath, '<path>')
@@ -184,10 +192,17 @@ def source_compare(sourcePath, opts):  # noqa
                         break
             sys.stdout.write(' %6d %6d' % (sizeX, sizeY))
             sys.stdout.write(' %4d' % frames)
-            if hasattr(ts, '_populatedLevels'):
-                sys.stdout.write(' %4d' % ts._populatedLevels)
+            if frames > 1 and 'IndexStride' in ts.metadata:
+                axes = [vk[-1] for vk in sorted([
+                    (v, k) for k, v in ts.metadata['IndexStride'].items()
+                    if ts.metadata['IndexRange'][k] > 1])]
+                sys.stdout.write(' %-4s' % (''.join(
+                    k[5:] if k != 'IndexXY' else 'x' for k in axes)))
             else:
                 sys.stdout.write('     ')
+            sys.stdout.write(' ' + ((
+                '%3.0f' if opentime >= 10 else '%3.1f' if opentime >= 1 else '%4.2f'
+            ) % opentime).lstrip('0') + 's')
             sys.stdout.flush()
             t = time.time()
             try:
@@ -253,6 +268,11 @@ def source_compare(sourcePath, opts):  # noqa
             sys.stdout.write(' %6d %6d' % (ts.tileWidth, ts.tileHeight))
             if hasattr(ts, 'dtype'):
                 sys.stdout.write(' %4s' % numpy.dtype(ts.dtype).str.lstrip('|').lstrip('<')[:4])
+            else:
+                sys.stdout.write('     ')
+            sys.stdout.flush()
+            if hasattr(ts, '_populatedLevels'):
+                sys.stdout.write(' %4d' % ts._populatedLevels)
             else:
                 sys.stdout.write('     ')
             sys.stdout.flush()
