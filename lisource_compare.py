@@ -67,12 +67,12 @@ def float_format(val, length):
 
 
 def main(opts):
-    sources = sorted([sourcePath
-                      for source in opts.source
-                      for sourcePath in sorted(glob.glob(source))
-                      ])
-    sources += sorted([source for source in opts.source
-                       if source.startswith('https://') or source.startswith('http://')])
+    sources = {sourcePath for source in opts.source
+               for sourcePath in sorted(glob.glob(source))}
+    sources |= {sourcePath for sourcePath in opts.source if os.path.exists(sourcePath)}
+    sources |= {source for source in opts.source
+                if source.startswith('https://') or source.startswith('http://')}
+    sources = sorted(sources)
     for sourcePath in sources:
         source_compare(sourcePath, opts)
 
