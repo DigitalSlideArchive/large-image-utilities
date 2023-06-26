@@ -72,6 +72,12 @@ def main(opts):
     sources |= {sourcePath for sourcePath in opts.source if os.path.exists(sourcePath)}
     sources |= {source for source in opts.source
                 if source.startswith('https://') or source.startswith('http://')}
+    for source in sources.copy():
+        if os.path.isdir(source):
+            sources.remove(source)
+            for root, _dirs, files in os.walk(source):
+                for file in files:
+                    sources.add(os.path.join(source, root, file))
     sources = sorted(sources)
     for sourcePath in sources:
         source_compare(sourcePath, opts)
@@ -97,7 +103,7 @@ def source_compare(sourcePath, opts):  # noqa
     sys.stdout.write('mag um/pix')
     sys.stdout.write('  TileW  TileH')
     sys.stdout.write(' dtyp')
-    sys.stdout.write(' popL')
+    sys.stdout.write(' lv B')
     sys.stdout.write(' aImg')
     sys.stdout.write(' Histogram')
     sys.stdout.write(' Histogram')
@@ -272,9 +278,13 @@ def source_compare(sourcePath, opts):  # noqa
                 sys.stdout.write('     ')
             sys.stdout.flush()
             if hasattr(ts, '_populatedLevels'):
-                sys.stdout.write(' %4d' % ts._populatedLevels)
+                sys.stdout.write(' %2d' % ts._populatedLevels)
             else:
-                sys.stdout.write('     ')
+                sys.stdout.write('   ')
+            if ts.metadata.get('bandCount'):
+                sys.stdout.write(' %1d' % ts.metadata['bandCount'])
+            else:
+                sys.stdout.write('  ')
             sys.stdout.flush()
             try:
                 allist = ts.getAssociatedImagesList()
