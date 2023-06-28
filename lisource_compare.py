@@ -66,19 +66,33 @@ def float_format(val, length):
     return s
 
 
-def main(opts):
-    sources = {sourcePath for source in opts.source
-               for sourcePath in sorted(glob.glob(source))}
-    sources |= {sourcePath for sourcePath in opts.source if os.path.exists(sourcePath)}
-    sources |= {source for source in opts.source
-                if source.startswith('https://') or source.startswith('http://')}
-    for source in sources.copy():
-        if os.path.isdir(source):
-            sources.remove(source)
+def get_sources(sourceList, sources=None):
+    sources = set(sources if sources else [])
+    for source in sourceList:
+        if os.path.isfile(source) or source.startswith('https://') or source.startswith('http://'):
+            sources.add(source)
+        elif os.path.isdir(source):
             for root, _dirs, files in os.walk(source):
                 for file in files:
                     sources.add(os.path.join(source, root, file))
+        elif source.startswith('-') and os.path.isfile(source[1:]):
+            sources.remove(source[1:])
+        elif source.startswith('-') and os.path.isdir(source[1:]):
+            for root, _dirs, files in os.walk(source[1:]):
+                for file in files:
+                    sources.remove(os.path.join(source[1:], root, file))
+        elif not source.startswith('-'):
+            sources |= {sourcePath for sourcePath in glob.glob(source)
+                        if os.path.isfile(source)}
+        else:
+            sources -= {sourcePath for sourcePath in glob.glob(source[1:])
+                        if os.path.isfile(source)}
     sources = sorted(sources)
+    return sources
+
+
+def main(opts):
+    sources = get_sources(opts.source)
     for sourcePath in sources:
         source_compare(sourcePath, opts)
 
@@ -381,7 +395,11 @@ def command():
         'image at the maximum level (which is slow).')
     parser.add_argument(
         'source', nargs='+', type=str,
-        help='Source file to read and analyze')
+        help='Source file to read and analyze.  This can be a directory for '
+        'the entire directory tree, a glob pattern, urls starting with http '
+        'or https.  Prefix with - to remove the file, directory, or glob '
+        'pattern from the sources analyzed.  Sources are analyzed in a sorted '
+        'order.')
     parser.add_argument(
         '--usesource', '--use', action='append',
         help='Only use the specified source.  Can be specified multiple times.')
