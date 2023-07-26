@@ -176,6 +176,8 @@ def main(sourceName, destName, compression):  # noqa
                     val = val.rsplit("' ...")[0] + "'"
                 if val[:1] == "'":
                     record['data'] = ast.literal_eval(val)
+                elif val[:2] == "b'":
+                    record['data'] = ast.literal_eval(val)
                 else:
                     record['data'] = [int(v) for v in val.split(' ') if v != '...']
             else:
