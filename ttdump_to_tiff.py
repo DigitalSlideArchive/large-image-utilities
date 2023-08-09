@@ -10,6 +10,7 @@ import tifftools
 
 
 def adjust_ifds(ifds, tmpfile, lenlist, compression):  # noqa
+    anySamplesFloat = False
     for ifd in ifds:
         maxlen = 0
         uncomplen = None
@@ -24,7 +25,7 @@ def adjust_ifds(ifds, tmpfile, lenlist, compression):  # noqa
         counts = None
 
         if maxlen:
-            lenlist.append((maxlen, None))
+            lenlist.append((maxlen, None, anySamplesFloat))
             maxlen = 0
         if tifftools.Tag.StripOffsets.value in ifd['tags']:
             off = ifd['tags'][tifftools.Tag.StripOffsets.value]
@@ -41,6 +42,9 @@ def adjust_ifds(ifds, tmpfile, lenlist, compression):  # noqa
             h2 = h
         if off:
             bps = sum(ifd['tags'][tifftools.Tag.BitsPerSample.value]['data'])
+            if tifftools.Tag.SampleFormat.value in ifd['tags']:
+                anySamplesFloat = anySamplesFloat or (
+                    ifd['tags'][tifftools.Tag.SampleFormat.value]['data'][0] not in {1, 2})
             if tifftools.Tag.Compression.value not in ifd['tags']:
                 ifd['tags'][tifftools.Tag.Compression.value] = {
                     'datatype': tifftools.Datatype.SHORT,
@@ -60,7 +64,7 @@ def adjust_ifds(ifds, tmpfile, lenlist, compression):  # noqa
             maxlen = max(maxlen, bytesperchunk)
             if h2 and h2 != h:
                 if len(off['data']) > 1:
-                    lenlist.append((maxlen, uncomplen))
+                    lenlist.append((maxlen, uncomplen, anySamplesFloat))
                     maxlen = 0
                 bytesperchunk = int(math.ceil(w * bps / 8)) * h2
                 if compression == 'packbits':
@@ -72,16 +76,16 @@ def adjust_ifds(ifds, tmpfile, lenlist, compression):  # noqa
         ifd['path_or_fobj'] = tmpfile
         ifd['size'] = sum(v[0] for v in lenlist) + maxlen
         if maxlen:
-            lenlist.append((maxlen, uncomplen))
+            lenlist.append((maxlen, uncomplen, anySamplesFloat))
     return lenlist
 
 
 def write(info, name, destName, compression):
     # For stripbytecounts and tilebytecounts, set compression to none and
-    # reclculate size based on strip or tile size
+    # recalculate size based on strip or tile size
     with tempfile.TemporaryFile() as tmpfile:
-        lenlist = adjust_ifds(info['ifds'], tmpfile, [(8, None)], compression)
-        for idx, [count, uncompcount] in enumerate(lenlist):
+        lenlist = adjust_ifds(info['ifds'], tmpfile, [(8, None, False)], compression)
+        for idx, [count, uncompcount, onlyZero] in enumerate(lenlist):
             val = idx
             if idx:
                 rem = 256 - idx
@@ -91,6 +95,8 @@ def write(info, name, destName, compression):
                     if rem & 1:
                         val += 1
                     rem >>= 1
+            if onlyZero:
+                val = 0
             val = val.to_bytes(1, 'little')
             chunk = 65536
             if not uncompcount:
@@ -120,7 +126,8 @@ def main(sourceName, destName, compression):  # noqa
             continue
         if line.startswith('Header: '):
             if len(info):
-                write(info, currentName, compression)
+                write(info, currentName, destName, compression)
+                raise Exception('Update destName')
             info = {}
             info['bigEndian'] = 'big-endian' in line
             info['bigtiff'] = 'BigTIFF' in line
