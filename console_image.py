@@ -39,10 +39,14 @@ def main(opts):
     thumbh = height if aspect_ratio > 1 else int(height / aspect_ratio)
 
     try:
-        img = large_image.open(opts.source).getThumbnail(
-            format='PIL', width=thumbw, height=thumbh)[0]
+        if not opts.use:
+            ts = large_image.open(opts.source)
+        else:
+            large_image.tilesource.loadTileSources()
+            ts = large_image.tilesource.AvailableTileSources[opts.use](opts.source)
     except Exception:
         return ''
+    img = ts.getThumbnail(format='PIL', width=thumbw, height=thumbh)[0]
     thumbw, thumbh = img.size
 
     if aspect_ratio < 1:
@@ -93,6 +97,8 @@ def command():
     parser.add_argument(
         '--contrast', type=float, default=0.25,
         help='Increase the contrast.  0 is no change, 1 is full.')
+    parser.add_argument(
+        '--use', help='Use a specific tile source.')
     opts = parser.parse_args()
     result = main(opts)
     if result:

@@ -173,7 +173,7 @@ def get_girder_client(opts):
 
 if __name__ == '__main__':  # noqa
     parser = argparse.ArgumentParser(
-        description='Add fake data to a folder of large images.')
+        description='Adjust import paths.')
     # Standard girder_client CLI options
     parser.add_argument(
         '--apiurl', '--api-url', '--api', '--url', '-a', dest='apiUrl',
