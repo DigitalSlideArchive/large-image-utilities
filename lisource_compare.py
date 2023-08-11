@@ -181,7 +181,7 @@ def source_compare(sourcePath, opts):  # noqa
                 sys.stdout.write(' %s\n' % sexp[:64 - slen])
                 sys.stdout.write('%s %s\n' % (
                     ' ' * slen if not couldread else ' canread' + ' ' * (slen - 8),
-                    sexp[59 - slen: (59 - slen) + (78 - slen)]))
+                    sexp[64 - slen: (64 - slen) + (78 - slen)]))
                 sys.stdout.flush()
                 continue
             frames = len(metadata.get('frames', [])) or 1
@@ -230,10 +230,10 @@ def source_compare(sourcePath, opts):  # noqa
             except Exception as exp:
                 sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
                 sexp = sexp.replace(sourcePath, '<path>')
-                sys.stdout.write(' %s\n' % sexp[:59 - slen])
+                sys.stdout.write(' %s\n' % sexp[:49 - slen])
                 sys.stdout.write('%s %s\n' % (
                     ' ' * slen if not couldread else ' canread' + ' ' * (slen - 8),
-                    sexp[59 - slen: (59 - slen) + (78 - slen)]))
+                    sexp[49 - slen: (49 - slen) + (78 - slen)]))
                 sys.stdout.flush()
                 continue
             thumbtime = time.time() - t

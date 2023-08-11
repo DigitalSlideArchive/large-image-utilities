@@ -26,6 +26,8 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
     if sparent['_modelType'] != 'folder':
         return
     for sitem in gcs.listItem(sparent['_id']):
+        if getattr(opts, 'substr', None) and opts.substr not in sitem['name']:
+            continue
         print('item', gcs.get(f'resource/{sitem["_id"]}/path', parameters={'type': 'item'}))
         ditem = gcd.createItem(
             dparent['_id'], sitem['name'], sitem['description'], True)
@@ -162,6 +164,7 @@ if __name__ == '__main__':
     parser.add_argument('--dest-password', help='Destination password.')
     parser.add_argument('--src-path', help='Source resource path.')
     parser.add_argument('--replace', action='store_true', help='Replace all annotations.')
+    parser.add_argument('--substr', help='All items must contain this substring.')
     parser.add_argument(
         '--dest-path', help='Destination resource path.  If the last '
         'component of this is ".", it is taken from the last component of '

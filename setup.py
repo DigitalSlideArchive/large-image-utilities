@@ -69,10 +69,11 @@ setup(
     py_modules=['ttdump_to_tiff', 'lisource_compare', 'li_summary', 'copy_annotations'],
     entry_points={
         'console_scripts': [
-            'ttdump_to_tiff = ttdump_to_tiff:command',
-            'lisource_compare = lisource_compare:command',
-            'li_summary = li_summary:command',
+            'console_image = console_image:command',
             'copy_annotations = copy_annotations:command',
+            'li_summary = li_summary:command',
+            'lisource_compare = lisource_compare:command',
+            'ttdump_to_tiff = ttdump_to_tiff:command',
         ]
     },
     python_requires='>=3.6',
