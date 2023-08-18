@@ -109,7 +109,7 @@ def command():  # noqa
                                 time2 = float(parts2[idx][:-1])
                                 if abs(time1 - time2) > 0.1 and (
                                         time1 / time2 if time2 > time1 else time2 / time1) < 0.5:
-                                    diff = True
+                                    diff = diff or ('time1' if time1 > time2 else 'time2')
             if diff:
                 if not lastprint:
                     if lastprint is not False:
@@ -125,10 +125,11 @@ def command():  # noqa
                     if projection is not None:
                         print(' %s' % projection.rstrip())
                     lastprint[1] = projection
+                diffc = '>' if diff is True else '+' if diff == 'time2' else '-'
                 print('<%s' % (s1['line1'].rstrip() if s1 else ''))
-                print('<%s' % (s1['line2'].rstrip() if s1 else ''))
-                print('>%s' % (s2['line1'].rstrip() if s2 else ''))
-                print('>%s' % (s2['line2'].rstrip() if s2 else ''))
+                print('<%s' % (s1.get('line2', '').rstrip() if s1 else ''))
+                print('%s%s' % (diffc, s2['line1'].rstrip() if s2 else ''))
+                print('%s%s' % (diffc, s2.get('line2', '').rstrip() if s2 else ''))
 
 
 if __name__ == '__main__':
