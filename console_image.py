@@ -12,7 +12,12 @@ import PIL.ImageOps
 
 def to_dots(clr, bw, usecolor):
     out = ''
-    if usecolor:
+    if isinstance(usecolor, dict):
+        if usecolor.get('last') == list(clr[:3]):
+            usecolor = False
+        else:
+            usecolor['last'] = list(clr[:3])
+    if usecolor or usecolor == {}:
         out += f'\033[38;2;{clr[0]};{clr[1]};{clr[2]}m'
     flat = bw.T.flatten()
     val = sum(2**idx if flat[idx] else 0 for idx in range(8))
@@ -65,8 +70,10 @@ def main(opts):
     dots = np.array(dotimg)
     chars = np.array(charimg)
 
+    lastcolor = {} if color else None
+
     output = [
-        [to_dots(chars[y][x], dots[y * 4:y * 4 + 4, x * 2:x * 2 + 2], color)
+        [to_dots(chars[y][x], dots[y * 4:y * 4 + 4, x * 2:x * 2 + 2], lastcolor)
          for x in range(chars.shape[1])]
         for y in range(chars.shape[0])
     ]

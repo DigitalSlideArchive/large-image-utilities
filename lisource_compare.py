@@ -17,6 +17,9 @@ os.environ['GDAL_PAM_ENABLED'] = 'NO'
 os.environ['CPL_LOG'] = os.devnull
 
 
+logging.getLogger('tifftools').setLevel(logging.ERROR)
+
+
 def histotext(h, maxchan=None):
     ctbl = '0123456789'
     hist = None
