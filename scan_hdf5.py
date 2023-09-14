@@ -2,6 +2,7 @@
 
 import argparse
 import itertools
+import math
 import sys
 import time
 
@@ -11,7 +12,101 @@ import numpy as np
 # Inspired from https://stackoverflow.com/a/43374773
 
 
-def scan_node(src, dest=None, analyze=False, showattrs=False, convert=None, exclude=None, indent=0):  # noqa
+def scan_dataset(v, analyze, showattrs, sample, indent):
+    minv = maxv = None
+    print('%s - %s %s %r %r %s' % (
+        '  ' * (indent + 1), v.name, v.dtype, v.shape,
+        v.chunks, v.compression))
+    if showattrs:
+        for ak in v.attrs:
+            print('%s   :%s: %r' % ('  ' * (indent + 1), ak, v.attrs[ak]))
+    if v.dtype.kind in {'f', 'i'} and analyze:
+        sumv = 0
+        for coor in itertools.product(*(
+                range(0, v.shape[idx], v.chunks[idx]) for idx in range(len(v.shape)))):
+            field = tuple(
+                slice(coor[idx], min(coor[idx] + v.chunks[idx], v.shape[idx]))
+                for idx in range(len(v.shape)))
+            part = v[field]
+            if minv is None:
+                minv = np.amin(part)
+                maxv = np.amax(part)
+            else:
+                minv = min(minv, np.amin(part))
+                maxv = max(maxv, np.amax(part))
+            if part.dtype == np.float16:
+                part = part.astype(np.float32)
+            sumv += part.sum()
+        avgv = sumv / v.size
+        print('%s   [%g,%g] %g' % (
+            '  ' * (indent + 1), minv, maxv, avgv))
+    if sample and len(v.shape) == 1:
+        checksize = int(math.ceil(v.shape[0] ** 0.5))
+        sampleset = np.unique(v[:min(v.shape[0], checksize * 2)])
+        if len(sampleset) < checksize:
+            sampleset = dict(zip(*np.unique(v, return_counts=True)))
+            sampleset = {k: val for val, k in sorted([
+                (val, k) for k, val in sampleset.items()], reverse=True)}
+            if len(sampleset) < max(10, checksize):
+                print('%s   [%d kinds] %r' % (
+                    '  ' * (indent + 1), len(sampleset),
+                    {k: sampleset[k] for k in itertools.islice(sampleset, 10)}))
+    return minv, maxv
+
+
+def write_dataset(k, v, dest, analyze, convert, minv, maxv, indent):
+    lasttime = time.time()
+    conv = convert and (v.dtype == np.float64 or (
+        v.dtype == np.float32 and convert == 'float16'))
+    if conv:
+        conv = (
+            np.float32 if convert == 'float32' or (
+                minv is not None and maxv is not None and max(abs(minv), maxv) >= 65504) else
+            np.float16)
+        if conv == v.dtype:
+            conv = False
+    if conv:
+        destv = dest.create_dataset(
+            k, shape=v.shape,
+            dtype=conv,
+            chunks=True, fillvalue=0,
+            compression='gzip', compression_opts=9, shuffle=True)
+    else:
+        destv = dest.create_dataset(
+            k, shape=v.shape,
+            dtype=v.dtype,
+            chunks=True, fillvalue=v.fillvalue,
+            compression='gzip', compression_opts=9, shuffle=v.shuffle)
+    for ak in v.attrs:
+        destv.attrs[ak] = v.attrs[ak]
+    steps = len(list(itertools.product(*(
+        range(0, v.shape[idx], destv.chunks[idx])
+        for idx in range(len(v.shape))))))
+    skip = 0
+    for cidx, coor in enumerate(itertools.product(*(
+            range(0, v.shape[idx], destv.chunks[idx])
+            for idx in range(len(v.shape))))):
+        if time.time() - lasttime > 10:
+            sys.stdout.write('  %5.2f%% %r %r %r\r' % (
+                100.0 * cidx / steps, coor, v.shape, destv.chunks))
+            sys.stdout.flush()
+            lasttime = time.time()
+        field = tuple(
+            slice(coor[idx], min(coor[idx] + destv.chunks[idx], v.shape[idx]))
+            for idx in range(len(v.shape)))
+        part = v[field]
+        if conv:
+            if not part.any():
+                skip += 1
+                continue
+            part = part.astype(conv)
+        destv[field] = part
+    print('%s > %s %s %r %r %s%s' % (
+        '  ' * (indent + 1), destv.name, destv.dtype, destv.shape,
+        destv.chunks, destv.compression,
+        ' %d' % skip if skip else ''))
+
+def scan_node(src, dest=None, analyze=False, showattrs=False, convert=None, exclude=None, sample=False, indent=0):  # noqa
     if exclude and src.name in exclude:
         return
     print('%s%s' % ('  ' * indent, src.name))
@@ -24,98 +119,25 @@ def scan_node(src, dest=None, analyze=False, showattrs=False, convert=None, excl
         if exclude and v.name in exclude:
             continue
         if isinstance(v, h5py.Dataset):
-            print('%s - %s %s %r %r %s' % (
-                '  ' * (indent + 1), v.name, v.dtype, v.shape,
-                v.chunks, v.compression))
-            if showattrs:
-                for ak in v.attrs:
-                    print('%s   :%s: %r' % ('  ' * (indent + 1), ak, v.attrs[ak]))
-            lasttime = time.time()
-            if v.dtype.kind in {'f', 'i'} and analyze:
-                minv = maxv = None
-                sumv = 0
-                for coor in itertools.product(*(
-                        range(0, v.shape[idx], v.chunks[idx]) for idx in range(len(v.shape)))):
-                    field = tuple(
-                        slice(coor[idx], min(coor[idx] + v.chunks[idx], v.shape[idx]))
-                        for idx in range(len(v.shape)))
-                    part = v[field]
-                    if minv is None:
-                        minv = np.amin(part)
-                        maxv = np.amax(part)
-                    else:
-                        minv = min(minv, np.amin(part))
-                        maxv = max(maxv, np.amax(part))
-                    if part.dtype == np.float16:
-                        part = part.astype(np.float32)
-                    sumv += part.sum()
-                avgv = sumv / v.size
-                print('%s   [%g,%g] %g' % (
-                    '  ' * (indent + 1), minv, maxv, avgv))
+            minv, maxv = scan_dataset(v, analyze, showattrs, sample, indent)
             if dest:
-                conv = convert and (v.dtype == np.float64 or (
-                    v.dtype == np.float32 and convert == 'float16'))
-                if conv:
-                    conv = np.float32 if convert == 'float32' or max(
-                        abs(minv), maxv) >= 65504 else np.float16
-                    if conv == v.dtype:
-                        conv = False
-                if conv:
-                    destv = dest.create_dataset(
-                        k, shape=v.shape,
-                        dtype=conv,
-                        chunks=True, fillvalue=0,
-                        compression='gzip', compression_opts=9, shuffle=True)
-                else:
-                    destv = dest.create_dataset(
-                        k, shape=v.shape,
-                        dtype=v.dtype,
-                        chunks=True, fillvalue=v.fillvalue,
-                        compression='gzip', compression_opts=9, shuffle=v.shuffle)
-                for ak in v.attrs:
-                    destv.attrs[ak] = v.attrs[ak]
-                steps = len(list(itertools.product(*(
-                    range(0, v.shape[idx], destv.chunks[idx])
-                    for idx in range(len(v.shape))))))
-                skip = 0
-                for cidx, coor in enumerate(itertools.product(*(
-                        range(0, v.shape[idx], destv.chunks[idx])
-                        for idx in range(len(v.shape))))):
-                    if time.time() - lasttime > 10:
-                        sys.stdout.write('  %5.2f%% %r %r %r\r' % (
-                            100.0 * cidx / steps, coor, v.shape, destv.chunks))
-                        sys.stdout.flush()
-                        lasttime = time.time()
-                    field = tuple(
-                        slice(coor[idx], min(coor[idx] + destv.chunks[idx], v.shape[idx]))
-                        for idx in range(len(v.shape)))
-                    part = v[field]
-                    if conv:
-                        if not part.any():
-                            skip += 1
-                            continue
-                        part = part.astype(conv)
-                    destv[field] = part
-                print('%s > %s %s %r %r %s%s' % (
-                    '  ' * (indent + 1), destv.name, destv.dtype, destv.shape,
-                    destv.chunks, destv.compression,
-                    ' %d' % skip if skip else ''))
-
+                write_dataset(k, v, dest, analyze, convert, minv, maxv, indent)
         elif isinstance(v, h5py.Group):
             destv = None
             if dest:
                 destv = dest.create_group(k)
-            scan_node(v, destv, analyze, showattrs, convert, exclude, indent=indent + 1)
+            scan_node(v, destv, analyze, showattrs, convert, exclude, sample, indent=indent + 1)
 
 
-def scan_hdf5(path, analyze=False, showattrs=False, outpath=None, convert=None, exclude=None):
+def scan_hdf5(path, analyze=False, showattrs=False, outpath=None, convert=None,
+              exclude=None, sample=False):
     if convert:
         analyze = True
     with h5py.File(path, 'r') as fptr:
         fptr2 = None
         if outpath:
             fptr2 = h5py.File(outpath, 'w')
-        scan_node(fptr, fptr2, analyze, showattrs, convert, exclude)
+        scan_node(fptr, fptr2, analyze, showattrs, convert, exclude, sample)
 
 
 def command():
@@ -130,6 +152,10 @@ def command():
         '--analyze', '-s', action='store_true',
         help='Analyze the min/max/average of datasets.')
     parser.add_argument(
+        '--sample', action='store_true',
+        help='Show a sample of 1-d data sets if they have fewer unique values '
+        'than the square root of their size.')
+    parser.add_argument(
         '--attrs', '-k', action='store_true',
         help='Show attributes on groups and datasets.')
     parser.add_argument(
@@ -141,7 +167,8 @@ def command():
         '--exclude', action='append',
         help='Exclude a dataset or group from the output file.')
     opts = parser.parse_args()
-    scan_hdf5(opts.source, opts.analyze, opts.attrs, opts.dest, opts.convert, opts.exclude)
+    scan_hdf5(opts.source, opts.analyze, opts.attrs, opts.dest, opts.convert,
+              opts.exclude, opts.sample)
 
 
 if __name__ == '__main__':
