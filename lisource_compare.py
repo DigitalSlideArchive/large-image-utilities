@@ -309,7 +309,7 @@ def source_compare(sourcePath, opts):  # noqa
                 for alkey in ['label', 'macro']:
                     if alkey in allist:
                         alnames += alkey[:1]
-                if len(alnames):
+                if len(alnames) or len(allist):
                     sys.stdout.write(' %s%*d' % (
                         alnames + ' ' if alnames else '',
                         4 - (len(alnames) + 1 if alnames else 0),

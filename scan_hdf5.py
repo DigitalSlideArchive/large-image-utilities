@@ -50,7 +50,7 @@ def scan_dataset(v, analyze, showattrs, sample, indent):
             if len(sampleset) < max(10, checksize):
                 print('%s   [%d kinds] %r' % (
                     '  ' * (indent + 1), len(sampleset),
-                    {k: sampleset[k] for k in itertools.islice(sampleset, 10)}))
+                    {k: sampleset[k] for k in itertools.islice(sampleset, 100)}))
     return minv, maxv
 
 
