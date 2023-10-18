@@ -94,9 +94,9 @@ def command():  # noqa
             diff = s1 is None or s2 is None
             if not diff:
                 parts11 = s1['line1'].split()
-                parts12 = s1['line2'].split()
+                parts12 = s1.get('line2', '').split()
                 parts21 = s2['line1'].split()
-                parts22 = s2['line2'].split()
+                parts22 = s2.get('line2', '').split()
                 for parts1, parts2 in ((parts11, parts21), (parts12, parts22)):
                     diff = diff or len(parts1) != len(parts2)
                     for idx in range(min(len(parts1), len(parts2))):
