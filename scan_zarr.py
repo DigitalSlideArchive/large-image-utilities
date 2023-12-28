@@ -25,13 +25,17 @@ def show_attrs(src, indent):
             print('%s:%s: %r' % ('  ' * indent, ak, src.attrs[ak]))
 
 
-def scan_dataset(v, analyze, showattrs, sample, indent):
+def scan_dataset(v, analyze, showattrs, sample, empty, indent):
     minv = maxv = None
+    if empty is not False:
+        empty = empty + 1 if empty is not True else 0
     print('%s - %s %s %r %r %s' % (
         '  ' * (indent + 1), v.name, v.dtype, v.shape,
         v.chunks, v.compressor.cname))
     if showattrs:
         show_attrs(v, indent + 1)
+    if v.dtype.kind in {'f', 'i', 'u'} and empty is not False:
+        v[...] = empty
     if v.dtype.kind in {'f', 'i', 'u'} and analyze:
         sumv = 0
         for coor in itertools.product(*(
@@ -63,35 +67,40 @@ def scan_dataset(v, analyze, showattrs, sample, indent):
                 print('%s   [%d kinds] %r' % (
                     '  ' * (indent + 1), len(sampleset),
                     {k: sampleset[k] for k in itertools.islice(sampleset, 100)}))
-    return minv, maxv
+    return minv, maxv, empty
 
 
-def scan_node(src, analyze=False, showattrs=False, sample=False, indent=0):
+def scan_node(src, analyze=False, showattrs=False, sample=False, empty=False, indent=0):
     print('%s%s' % ('  ' * indent, src.name))
     if showattrs:
         show_attrs(src, indent)
     for _k, v in src.items():
         if isinstance(v, zarr.core.Array):
-            minv, maxv = scan_dataset(v, analyze, showattrs, sample, indent)
+            minv, maxv, empty = scan_dataset(v, analyze, showattrs, sample, empty, indent)
         elif isinstance(v, zarr.hierarchy.Group):
-            scan_node(v, analyze, showattrs, sample, indent=indent + 1)
+            empty = scan_node(v, analyze, showattrs, sample, empty, indent=indent + 1)
+    return empty
 
 
-def scan_zarr(path, analyze=False, showattrs=False, sample=False):
+def scan_zarr(path, analyze=False, showattrs=False, sample=False, empty=False):
     if os.path.isdir(path):
         if (not os.path.exists(os.path.join(path, '.zgroup')) and
-                not os.path.exists(os.path.join(path, '.zattrs'))):
+                not os.path.exists(os.path.join(path, '.zattrs')) and
+                not os.path.exists(os.path.join(path, '.zarray'))):
             print(f'Cannot parse {path}')
             return
     try:
         fptr = zarr.open(zarr.SQLiteStore(str(path)))
     except Exception:
         try:
-            fptr = zarr.open(path)
+            fptr = zarr.open(path, mode='r' if not empty else 'r+')
         except Exception:
             print(f'Cannot parse {path}')
             return
-    scan_node(fptr, analyze, showattrs, sample)
+    if isinstance(fptr, zarr.core.Array):
+        scan_dataset(fptr, analyze, showattrs, sample, empty, 0)
+    else:
+        scan_node(fptr, analyze, showattrs, sample, empty)
 
 
 def command():
@@ -111,9 +120,12 @@ def command():
     parser.add_argument(
         '--attrs', '-k', action='store_true',
         help='Show attributes on groups and datasets.')
+    parser.add_argument(
+        '--empty', action='store_true',
+        help='Modify the file, making all arrays a constant value.')
     opts = parser.parse_args()
     print(opts.source)
-    scan_zarr(opts.source, opts.analyze, opts.attrs, opts.sample)
+    scan_zarr(opts.source, opts.analyze, opts.attrs, opts.sample, opts.empty)
 
 
 if __name__ == '__main__':

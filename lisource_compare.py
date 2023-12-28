@@ -12,12 +12,20 @@ import time
 
 import large_image
 import numpy
+import yaml
 
 os.environ['GDAL_PAM_ENABLED'] = 'NO'
 os.environ['CPL_LOG'] = os.devnull
 
 
 logging.getLogger('tifftools').setLevel(logging.ERROR)
+
+
+def yaml_dict_dump(dumper, data):
+    return dumper.represent_dict(data)
+
+
+yaml.add_representer(large_image.tilesource.utilities.JSONDict, yaml_dict_dump)
 
 
 def histotext(h, maxchan=None):
@@ -86,22 +94,48 @@ def get_sources(sourceList, sources=None):
                     sources.remove(os.path.join(source[1:], root, file))
         elif not source.startswith('-'):
             sources |= {sourcePath for sourcePath in glob.glob(source)
-                        if os.path.isfile(source)}
+                        if os.path.isfile(sourcePath)}
         else:
             sources -= {sourcePath for sourcePath in glob.glob(source[1:])
-                        if os.path.isfile(source)}
+                        if os.path.isfile(sourcePath)}
     sources = sorted(sources)
     return sources
 
 
 def main(opts):
+    if opts.out:
+
+        class TeeOut:
+            def __init__(self, stream1, stream2):
+                self.stream1 = stream1
+                self.stream2 = stream2
+
+            def write(self, data):
+                self.stream1.write(data)
+                self.stream2.write(data)
+
+            def flush(self):
+                self.stream1.flush()
+                self.stream2.flush()
+
+        sys.stdout = TeeOut(sys.stdout, open(opts.out, 'w'))
+
     sources = get_sources(opts.source)
+    results = []
     for sourcePath in sources:
-        source_compare(sourcePath, opts)
+        results.append(source_compare(sourcePath, opts))
+    if opts.yaml:
+        yaml.dump(results, open(opts.yaml, 'w'), sort_keys=False)
 
 
 def source_compare(sourcePath, opts):  # noqa
-    sys.stdout.write('%s\n' % sourcePath)
+    results = {'path': sourcePath}
+    if os.path.isfile(sourcePath):
+        results['filesize'] = os.path.getsize(sourcePath)
+    if getattr(opts, 'size', False) and os.path.isfile(sourcePath):
+        sys.stdout.write('%s %d\n' % (sourcePath, os.path.getsize(sourcePath)))
+    else:
+        sys.stdout.write('%s\n' % sourcePath)
     sys.stdout.flush()
     canread = large_image.canReadList(sourcePath)
     large_image.cache_util.cachesClear()
@@ -140,8 +174,10 @@ def source_compare(sourcePath, opts):  # noqa
         kwargs['encoding'] = opts.encoding
     styles = [None if val == '' else val for val in (opts.style or [None])]
     projections = [None if val == '' else val for val in (opts.projection or [None])]
+    results['styles'] = []
     for (styleidx, style), (projidx, projection) in itertools.product(
             enumerate(styles), enumerate(projections)):
+        results['styles'].append({'style': style, 'projection': projection, 'sources': {}})
         kwargs['style'] = style
         if style is None:
             kwargs.pop('style', None)
@@ -161,6 +197,7 @@ def source_compare(sourcePath, opts):  # noqa
                     large_image.tilesource.AvailableTileSources[source],
                     '_geospatial_source', None):
                 continue
+            result = results['styles'][-1]['sources'][source] = {}
             sys.stdout.write('%s' % (source + ' ' * (slen - len(source))))
             sys.stdout.flush()
             try:
@@ -168,6 +205,8 @@ def source_compare(sourcePath, opts):  # noqa
                 ts = large_image.tilesource.AvailableTileSources[source](sourcePath, **kwargs)
                 opentime = time.time() - t
             except Exception as exp:
+                result['exception'] = str(exp)
+                result['error'] = 'open'
                 sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
                 sexp = sexp.replace(sourcePath, '<path>')
                 sys.stdout.write(' %s\n' % sexp[:78 - slen])
@@ -175,9 +214,12 @@ def source_compare(sourcePath, opts):  # noqa
                 sys.stdout.flush()
                 continue
             sizeX, sizeY = ts.sizeX, ts.sizeY
+            result['sizeX'], result['sizeY'] = ts.sizeX, ts.sizeY
             try:
                 metadata = ts.getMetadata()
             except Exception as exp:
+                result['exception'] = str(exp)
+                result['error'] = 'metadata'
                 sys.stdout.write(' %6d %6d' % (sizeX, sizeY))
                 sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
                 sexp = sexp.replace(sourcePath, '<path>')
@@ -215,7 +257,10 @@ def source_compare(sourcePath, opts):  # noqa
                         break
             sys.stdout.write(' %6d %6d' % (sizeX, sizeY))
             sys.stdout.write(' %4d' % frames)
+            result['frames'] = frames
+            result['metadata'] = ts.metadata
             if frames > 1 and 'IndexStride' in ts.metadata:
+                result['IndexRange'] = ts.metadata['IndexRange']
                 axes = [vk[-1] for vk in sorted([
                     (v, k) for k, v in ts.metadata['IndexStride'].items()
                     if ts.metadata['IndexRange'][k] > 1])]
@@ -223,6 +268,7 @@ def source_compare(sourcePath, opts):  # noqa
                     k[5:] if k != 'IndexXY' else 'x' for k in axes)))
             else:
                 sys.stdout.write('     ')
+            result['opentime'] = opentime
             sys.stdout.write(' ' + ((
                 '%3.0f' if opentime >= 10 else '%3.1f' if opentime >= 1 else '%4.2f'
             ) % opentime).lstrip('0') + 's')
@@ -231,6 +277,8 @@ def source_compare(sourcePath, opts):  # noqa
             try:
                 img = ts.getThumbnail(**kwargs)
             except Exception as exp:
+                result['exception'] = str(exp)
+                result['error'] = 'thumbnail'
                 sexp = str(exp).replace('\n', ' ').replace('  ', ' ').strip()
                 sexp = sexp.replace(sourcePath, '<path>')
                 sys.stdout.write(' %s\n' % sexp[:49 - slen])
@@ -240,18 +288,21 @@ def source_compare(sourcePath, opts):  # noqa
                 sys.stdout.flush()
                 continue
             thumbtime = time.time() - t
+            result['thumbtime'] = thumbtime
             sys.stdout.write(' %8.3fs' % thumbtime)
             sys.stdout.flush()
             write_thumb(img[0], source, thumbs, 'thumbnail', opts, styleidx, projidx)
             t = time.time()
             img = ts.getTile(tx0, ty0, tz0, sparseFallback=True)
             tile0time = time.time() - t
+            result['tile0time'] = tile0time
             sys.stdout.write(' %8.3fs' % tile0time)
             sys.stdout.flush()
             write_thumb(img, source, thumbs, 'tile0', opts, styleidx, projidx)
             t = time.time()
             img = ts.getTile(hx, hy, levels - 1, sparseFallback=True)
             tilentime = time.time() - t
+            result['tilentime'] = tilentime
             sys.stdout.write(' %8.3fs' % tilentime)
             sys.stdout.flush()
             write_thumb(img, source, thumbs, 'tilen', opts, styleidx, projidx)
@@ -263,11 +314,14 @@ def source_compare(sourcePath, opts):  # noqa
                 t = time.time()
                 img = ts.getTile(hx, hy, levels - 1, frame=frames - 1, sparseFallback=True)
                 tilefntime = time.time() - t
+                result['tilef0time'] = tilef0time
+                result['tilefntime'] = tilefntime
                 sys.stdout.write(' %8.3fs' % (tilef0time + tilefntime))
                 sys.stdout.flush()
                 write_thumb(img, source, thumbs, 'tilefn', opts, styleidx, projidx)
             sys.stdout.write('\n')
 
+            result['couldread'] = couldread
             if not couldread:
                 sys.stdout.write(' !canread' + (' ' * (slen - 9)))
             else:
@@ -290,21 +344,25 @@ def source_compare(sourcePath, opts):  # noqa
                 sys.stdout.write(umstr)
             sys.stdout.write(' %6d %6d' % (ts.tileWidth, ts.tileHeight))
             if hasattr(ts, 'dtype'):
+                result['dtype'] = str(ts.dtype)
                 sys.stdout.write(' %4s' % numpy.dtype(ts.dtype).str.lstrip('|').lstrip('<')[:4])
             else:
                 sys.stdout.write('     ')
             sys.stdout.flush()
             if hasattr(ts, '_populatedLevels'):
+                result['populatedLevels'] = ts._populatedLevels
                 sys.stdout.write(' %2d' % ts._populatedLevels)
             else:
                 sys.stdout.write('   ')
             if ts.metadata.get('bandCount'):
+                result['bandCount'] = ts.metadata['bandCount']
                 sys.stdout.write(' %1d' % ts.metadata['bandCount'])
             else:
                 sys.stdout.write('  ')
             sys.stdout.flush()
             try:
                 allist = ts.getAssociatedImagesList()
+                result['associatedImages'] = allist
                 alnames = ''
                 for alkey in ['label', 'macro']:
                     if alkey in allist:
@@ -316,30 +374,34 @@ def source_compare(sourcePath, opts):  # noqa
                         len(allist)))
                 else:
                     sys.stdout.write('     ')
-            except Exception:
+            except Exception as exp:
+                result['associatedImagesError'] = str(exp)
                 sys.stdout.write(' fail')
             sys.stdout.flush()
 
             # get maxval for other histograms
             h = ts.histogram(onlyMinMax=True, output=dict(maxWidth=2048, maxHeight=2048), **kwargs)
             maxval = max(h['max'].tolist())
-            maxval = 2 ** (int((math.log(maxval or 1) / math.log(2))) + 1) if maxval > 1 else 1
+            maxval = 2 ** (int(math.log(maxval or 1) / math.log(2)) + 1) if maxval > 1 else 1
             # thumbnail histogram
             h = ts.histogram(bins=9, output=dict(maxWidth=256, maxHeight=256),
                              range=[0, maxval], **kwargs)
             maxchan = len(h['histogram'])
             if maxchan == 4:
                 maxchan = 3
+            result['thumbnail_histogram'] = histotext(h, maxchan)
             sys.stdout.write(' %s' % histotext(h, maxchan))
             sys.stdout.flush()
             # full image histogram
             h = ts.histogram(bins=9, output=dict(maxWidth=2048, maxHeight=2048),
                              range=[0, maxval], **kwargs)
+            result['full_2048_histogram'] = histotext(h, maxchan)
             sys.stdout.write(' %s' % histotext(h, maxchan))
             sys.stdout.flush()
             if opts.full:
                 # at full res
                 h = ts.histogram(bins=9, range=[0, maxval], **kwargs)
+                result['full_max_histogram'] = histotext(h, maxchan)
                 sys.stdout.write(' %s' % histotext(h, maxchan))
                 sys.stdout.flush()
             else:
@@ -350,10 +412,12 @@ def source_compare(sourcePath, opts):  # noqa
                     h = ts.histogram(
                         bins=9, output=dict(maxWidth=2048, maxHeight=2048),
                         range=[0, maxval], frame=frames - 1, **kwargs)
+                    result['full_f_2048_histogram'] = histotext(h, maxchan)
                     sys.stdout.write(' %s' % histotext(h, maxchan))
                 else:
                     # at full res
                     h = ts.histogram(bins=9, range=[0, maxval], frame=frames - 1, **kwargs)
+                    result['full_f_max_histogram'] = histotext(h, maxchan)
                     sys.stdout.write(' %s' % histotext(h, maxchan))
                 sys.stdout.flush()
             sys.stdout.write('\n')
@@ -364,9 +428,10 @@ def source_compare(sourcePath, opts):  # noqa
                         t = -time.time()
                         h = ts.histogram(bins=32, output=dict(
                             maxWidth=int(math.ceil(ts.sizeX / 2 ** (levels - 1 - ll))),
-                            maxHeight=int(math.ceil(ts.sizeY / 2 ** (levels - 1 - ll)))
+                            maxHeight=int(math.ceil(ts.sizeY / 2 ** (levels - 1 - ll))),
                         ), range=[0, maxval], frame=f, **kwargs)
                         t += time.time()
+                        result[f'level_{ll}_f_{f}_histogram'] = histotext(h, maxchan)
                         sys.stdout.write('%3d%5d %s' % (ll, f, histotext(h, maxchan)))
                         sys.stdout.write(' %s %s %s %s' % (
                             float_format(min(h['min'].tolist()[:maxchan]), 6),
@@ -379,12 +444,14 @@ def source_compare(sourcePath, opts):  # noqa
             if opts.metadata:
                 sys.stdout.write(pprint.pformat(ts.getMetadata()).strip() + '\n')
             if opts.internal:
+                result['internal_metadata'] = ts.getInternalMetadata()
                 sys.stdout.write(pprint.pformat(ts.getInternalMetadata()).strip() + '\n')
             if opts.assoc:
                 sys.stdout.write(pprint.pformat(ts.getAssociatedImagesList()).strip() + '\n')
                 for assoc in ts.getAssociatedImagesList():
                     img = ts.getAssociatedImage(assoc, **kwargs)
                     write_thumb(img[0], source, thumbs, 'assoc-%s' % assoc, opts, styleidx, projidx)
+    return results
 
 
 def command():
@@ -442,6 +509,13 @@ def command():
         help='Use the projection when testing.  Can be specified multiple '
         'times.  EPSG:3857 is a common choice.')
     # TODO add a flag to skip non-geospatial sources if a projection is used
+    parser.add_argument(
+        '--size', action='store_true',
+        help='Report the size of the file.')
+    parser.add_argument(
+        '--yaml', '--yaml-output', help='Output the results to a yaml file.')
+    parser.add_argument(
+        '--out', '--output', help='Redirect output to a text file.')
     parser.add_argument(
         '--verbose', '-v', action='count', default=0, help='Increase verbosity')
     parser.add_argument(
