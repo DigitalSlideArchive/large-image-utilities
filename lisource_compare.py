@@ -80,7 +80,7 @@ def float_format(val, length):
 def get_sources(sourceList, sources=None):
     sources = set(sources if sources else [])
     for source in sourceList:
-        if os.path.isfile(source) or source.startswith('https://') or source.startswith('http://'):
+        if os.path.isfile(source) or source.startswith(('https://', 'http://')):
             sources.add(source)
         elif os.path.isdir(source):
             for root, _dirs, files in os.walk(source):
