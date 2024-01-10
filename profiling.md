@@ -91,9 +91,14 @@ pprofile.out is a text file:
    391|        62|   0.00130415|  2.10347e-05|  0.00%|            pilimg = pilimg.crop((1, 1, pilimg.width - overscan, pilimg.height - overscan))
 ```
 
-To find the lines where more than 10% of the time was spent:
+To find the lines where more than 10% of the time was spent in a deterministic profile:
 ```
 grep '\( [1-9]\|[1-9][0-9]\)\.[0-9][0-9]%' pprofile.out
+```
+
+To find the lines where more than 10,000 samples were taken in a statistical profile:
+```
+grep '|[ 0-9][ 0-9][ 0-9][ 0-9][ 0-9][0-9][0-9][0-9][0-9][0-9]|' pprofile.out
 ```
 
 
@@ -115,7 +120,7 @@ viztracer --tracer_entries 10000000 -o viztracer.json lisource_compare TCGA-AA.s
 vizviewer -s -p 8000 viztracer.json
 ```
 
-Then open a web browser to port 8000.
+Then open a web browser to port 8000.  You can run with the `--use_external_processor` flag to show more samples, but then the port doesn't seem configurable.
 
 
 ## py-spy
@@ -152,7 +157,7 @@ Danger: top mode sometimes kills the parent process when disconnecting
 ### Command
 
 ```
-memray run --output memrayout.bin lisource_compare TCGA-AA.svs --encoding=PNG
+memray run --output memrayout.bin --force lisource_compare TCGA-AA.svs --encoding=PNG
 ```
 
 ### Results
