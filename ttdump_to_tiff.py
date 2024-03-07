@@ -80,6 +80,83 @@ def adjust_ifds(ifds, tmpfile, lenlist, compression):  # noqa
     return lenlist
 
 
+def set_mcu_starts(path, mcutag, offset, length):
+    """
+    Find the MCU restart locations and populate tag data with the information.
+
+    :param path: path to the file with JPEG compression.
+    :param mcutag: A dictionary whose 'data' value will be set to the list of
+        mcu starts.
+    :param offset: start of the JPEG in the file.
+    :param length: length of the JPEG in the file.
+    """
+    fptr = open(path, 'rb')
+    fptr.seek(offset)
+    chunksize = 2 * 1024 ** 2
+    mcu = []
+    previous = b''
+    pos = 0
+    while length > 0:
+        data = fptr.read(min(length, chunksize))
+        if len(data) != min(length, chunksize):
+            length = 0
+        else:
+            length -= len(data)
+        data = previous + data
+        parts = data.split(b'\xff')
+        previous = b'\xff' + parts[-1]
+        pos += len(parts[0])
+        for part in parts[1:-1]:
+            if not len(mcu):
+                if part[0] == 0xda:
+                    mcu.append(pos + 2 + part[1] * 256 + part[2])
+            elif part[0] >= 0xd0 and part[0] <= 0xd7:
+                mcu.append(pos + 2)
+            pos += 1 + len(part)
+    mcutag['data'] = mcu
+
+
+def convert_to_ndpi(destName):
+    import os
+    import shutil
+    import subprocess
+
+    import pyvips
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        info = tifftools.read_tiff(destName)
+        for idx, ifd in enumerate(info['ifds']):
+            if tifftools.Tag.NDPI_MCU_STARTS.value in ifd['tags']:
+                ifdw = ifd['tags'][tifftools.Tag.ImageWidth.value]['data'][0]
+                ifdh = ifd['tags'][tifftools.Tag.ImageLength.value]['data'][0]
+                jpegPath = os.path.join(tempdir, '_wsi_%d.jpeg' % idx)
+                jpegPos = os.path.getsize(destName)
+                img = pyvips.Image.tiffload(destName, page=idx)
+                img.jpegsave(jpegPath, Q=95, subsample_mode=pyvips.ForeignSubsample.OFF)
+                restartInterval = (
+                    int(math.ceil(ifdw / 8) * math.ceil(ifdh / 8)) //
+                    len(ifd['tags'][tifftools.Tag.NDPI_MCU_STARTS.value]['data']))
+                subprocess.check_call(
+                    ['jpegtran', '-restart', '%dB' % restartInterval, jpegPath],
+                    stdout=open(destName, 'ab'))
+                jpegLen = os.path.getsize(destName) - jpegPos
+                ifd['tags'][tifftools.Tag.Compression.value]['data'][0] = \
+                    tifftools.constants.Compression.JPEG.value
+                ifd['tags'][tifftools.Tag.Photometric.value]['data'][0] = \
+                    tifftools.constants.Photometric.YCbCr.value
+                ifd['tags'][tifftools.Tag.StripOffsets.value]['data'] = [jpegPos]
+                ifd['tags'][tifftools.Tag.StripByteCounts.value]['data'] = [jpegLen]
+                set_mcu_starts(
+                    destName, ifd['tags'][tifftools.Tag.NDPI_MCU_STARTS.value],
+                    ifd['tags'][tifftools.Tag.StripOffsets.value]['data'][0],
+                    sum(ifd['tags'][tifftools.Tag.StripByteCounts.value]['data']))
+        info['size'] = os.path.getsize(destName)
+        for ifd in info['ifds']:
+            ifd['size'] = info['size']
+        tifftools.write_tiff(info, destName + '.ndpi', allowExisting=True)
+        shutil.move(destName + '.ndpi', destName)
+
+
 def write(info, name, destName, compression):
     # For stripbytecounts and tilebytecounts, set compression to none and
     # recalculate size based on strip or tile size
@@ -112,6 +189,8 @@ def write(info, name, destName, compression):
                     tmpfile.write(rle)
         print('%s -> %s' % (name or '', destName))
         tifftools.write_tiff(info, destName, allowExisting=True)
+    if destName.endswith('.ndpi'):
+        convert_to_ndpi(destName)
 
 
 def main(sourceName, destName, compression):  # noqa
