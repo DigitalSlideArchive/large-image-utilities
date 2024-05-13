@@ -48,7 +48,10 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
                         dfile = pfile
                         break
                 if dfile is None:
-                    print('file', file['name'], file['size'])
+                    print('file', file['name'], file.get('size'))
+                    if file.get('size') is None:
+                        # TODO: Handle link files
+                        continue
                     with tempfile.TemporaryDirectory() as tmpdirname:
                         temppath = os.path.join(tmpdirname, 'temp.tmp')
                         gcs.downloadFile(file['_id'], temppath)
@@ -117,7 +120,13 @@ def copy_resource(gcs, gcd, src_path, dest_path, opts):  # noqa
             coll_path = gcs.get(f'resource/{coll["_id"]}/path', parameters={'type': 'collection'})
             copy_resource(gcs, gcd, coll_path, os.path.join(
                 dest_path, coll_path.split(os.path.sep)[-1]), opts)
-    stop = gcs.get('resource/lookup', parameters={'path': src_path})
+    if src_path in {'/', '/collection', '/user'}:
+        return
+    try:
+        stop = gcs.get('resource/lookup', parameters={'path': src_path})
+    except girder_client.HttpError:
+        print(f'Failed looking up {src_path}')
+        return
     try:
         dtop = gcd.get('resource/lookup', parameters={'path': dest_path})
     except girder_client.HttpError:

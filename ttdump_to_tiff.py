@@ -188,7 +188,7 @@ def write(info, name, destName, compression):
                             1, 'little') + val
                     tmpfile.write(rle)
         print('%s -> %s' % (name or '', destName))
-        tifftools.write_tiff(info, destName, allowExisting=True)
+        tifftools.write_tiff(info, destName, allowExisting=True, dedup=True, ifdsFirst=True)
     if destName.endswith('.ndpi'):
         convert_to_ndpi(destName)
 
