@@ -3,8 +3,10 @@
 # pip install girder_client
 
 import argparse
+import json
 import hashlib
 import os
+import subprocess
 import time
 
 import girder_client
@@ -26,7 +28,17 @@ def generate_hash(gc, opts, file):
     return 1
 
 
-def walk_files(gc, opts, baseFolder=None):  # noqa
+def walk_files(gc, opts, baseFolder=None, query=None):  # noqa
+    if query and baseFolder is None and not getattr(opts, 'filter', None):
+        q = {'itemId': {'$exists': True}, 'linkUrl': {'$exists': False},
+             'attachedToId': {'$exists': False}}
+        q.update(query)
+        params = {'query': json.dumps(q), 'sort': '_id', 'sortdir': -1 if opts.reverse else 1}
+        try:
+            yield from gc.listResource('file/query', params=params)
+            return
+        except Exception:
+            pass
     if baseFolder is None:
         if not opts.reverse:
             for user in gc.listUser():
@@ -74,6 +86,17 @@ def walk_files(gc, opts, baseFolder=None):  # noqa
 def scan_mount(base, known, opts):
     start = time.time()
     last = start
+    for line in subprocess.Popen(['find', base], stdout=subprocess.PIPE).stdout:
+        path = os.path.join(base, line[:-1].decode())
+        flen = os.path.getsize(path)
+        known['len'].setdefault(flen, set())
+        known['len'][flen].add(path)
+        if time.time() - last > 10 and opts.verbose >= 2:
+            print('  %3.5fs - %d distinct lengths, %d files' % (
+                time.time() - start, len(known['len']),
+                sum(len(x) for x in known['len'].values())))
+            last = time.time()
+    """
     for root, _dirs, files in os.walk(base):
         for file in files:
             path = os.path.join(base, root, file)
@@ -81,8 +104,15 @@ def scan_mount(base, known, opts):
             known['len'].setdefault(flen, set())
             known['len'][flen].add(path)
             if time.time() - last > 10 and opts.verbose >= 2:
-                print('  %3.5fs - %d distinct lengths' % (time.time() - start, len(known['len'])))
+                print('  %3.5fs - %d distinct lengths, %d files' % (
+                    time.time() - start, len(known['len']),
+                    sum(len(x) for x in known['len'].values())))
                 last = time.time()
+    """
+    if opts.verbose >= 2:
+        print('  %3.5fs - %d distinct lengths, %d files' % (
+            time.time() - start, len(known['len']),
+            sum(len(x) for x in known['len'].values())))
 
 
 def get_fsassetstore(gc):
@@ -223,12 +253,14 @@ if __name__ == '__main__':  # noqa
     count = 0
     hashcount = 0
     if opts.hash:
-        for file in walk_files(gc, opts):
+        for file in walk_files(gc, opts, query={'sha512': {'$exists': False}}):
             hashcount += generate_hash(gc, opts, file)
             count += 1
             if time.time() - lastlog > 10 and opts.verbose >= 2:
                 print('Hashed %d/%d files' % (hashcount, count))
                 lastlog = time.time()
+        if opt.verbose >= 2:
+            print('Hashed %d/%d files' % (hashcount, count))
     known_files = {'len': {}, 'sha': {}, 'path': {}}
     for mount in opts.mount:
         if opts.verbose >= 2:
@@ -236,16 +268,24 @@ if __name__ == '__main__':  # noqa
         scan_mount(mount, known_files, opts)
     assetstore = get_fsassetstore(gc)
     count = 0
-    for file in walk_files(gc, opts):
+    for file in walk_files(gc, opts, query={
+            'sha512': {'$exists': True}, 'imported': {'$exists': False},
+            'size': {'$exists': True, '$gte': opts.size}}):
         adjust_to_import(gc, opts, assetstore, known_files, file)
         count += 1
         if time.time() - lastlog > 10 and opts.verbose >= 2:
             print('Checked direct %d/%d files' % (len(known_files['path']), count))
             lastlog = time.time()
+        if opts.verbose >= 2:
+            print('Checked direct %d/%d files' % (len(known_files['path']), count))
     count = 0
-    for file in walk_files(gc, opts):
+    for file in walk_files(gc, opts, query={
+            'sha512': {'$exists': True}, 'imported': {'$exists': True},
+            'size': {'$exists': True}}):
         adjust_current_import(gc, opts, assetstore, known_files, file)
         count += 1
         if time.time() - lastlog > 10 and opts.verbose >= 2:
             print('Checked import %d/%d files' % (len(known_files['path']), count))
             lastlog = time.time()
+        if opts.verbose >= 2:
+            print('Checked import %d/%d files' % (len(known_files['path']), count))
