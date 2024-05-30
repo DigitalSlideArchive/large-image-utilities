@@ -200,6 +200,43 @@ def get_girder_client(opts):
     return girder_client.cli.GirderCli(**gcopts)
 
 
+def check_assetstore(gc, opts):
+    basepath = os.path.realpath(os.path.expanduser(opts.assetstore))
+    start = time.time()
+    last = start
+    checked = 0
+    removed = 0
+    for line in subprocess.Popen(['find', basepath], stdout=subprocess.PIPE).stdout:
+        path = line.decode().rstrip()
+        if not path.startswith(basepath):
+            continue
+        subpath = path[len(basepath):].lstrip(os.path.sep)
+        if not os.path.isfile(os.path.join(basepath, subpath)):
+            continue
+        first = subpath.split(os.path.sep)[0]
+        try:
+            if first != 'temp' and int(first, 16) >= 256:
+                continue
+        except ValueError:
+            continue
+        if time.time() - last > 10 and opts.verbose >= 2:
+            print('  %3.5fs - %d files checked, %d removed' % (
+                time.time() - start, checked, removed))
+            last = time.time()
+        q = {'imported': {'$exists': False}, 'path': subpath}
+        params = {'query': json.dumps(q)}
+        result = list(gc.listResource('file/query', params=params, limit=1))
+        checked += 1
+        if len(result):
+            continue
+        os.unlink(os.path.join(basepath, subpath))
+        removed += 1
+        if opts.verbose >= 1:
+            print('Removed abandoned file %s' % subpath)
+    if opts.verbose >= 2:
+        print('  %3.5fs - %d files checked, %d removed' % (
+            time.time() - start, checked, removed))
+
 
 if __name__ == '__main__':  # noqa
     parser = argparse.ArgumentParser(
@@ -239,11 +276,24 @@ if __name__ == '__main__':  # noqa
     parser.add_argument(
         '--size', type=int, default=100000,
         help='Minimum size of a file to remove from uploads and move to imports')
-    parser.add_argument('--hash', default=True, action='store_true')
+    parser.add_argument(
+        '--hash', default=True, action='store_true',
+        help='Make sure all files have computed hash values (default).')
     parser.add_argument('--no-hash', dest='hash', action='store_false')
+    parser.add_argument(
+        '--direct', default=True, action='store_true',
+        help='Check if direct (non-imported) files could be moved to '
+        'reference imported paths (default).')
+    parser.add_argument('--no-direct', dest='direct', action='store_false')
+    parser.add_argument(
+        '--valid', default=True, action='store_true',
+        help='Check if import paths are still valid or have moved (default).')
+    parser.add_argument('--no-valid', dest='valid', action='store_false')
     parser.add_argument('--reverse', action='store_true')
     parser.add_argument(
         '--filter', help='Only process users and collections that match this string')
+    parser.add_argument(
+        '--assetstore', help='Directory of the assetstore to check for abandoned files.')
 
     opts = parser.parse_args()
     if opts.verbose >= 2:
@@ -262,30 +312,35 @@ if __name__ == '__main__':  # noqa
         if opt.verbose >= 2:
             print('Hashed %d/%d files' % (hashcount, count))
     known_files = {'len': {}, 'sha': {}, 'path': {}}
-    for mount in opts.mount:
-        if opts.verbose >= 2:
-            print('Scanning %s' % mount)
-        scan_mount(mount, known_files, opts)
+    if opts.direct or opts.valid:
+        for mount in opts.mount:
+            if opts.verbose >= 2:
+                print('Scanning %s' % mount)
+            scan_mount(mount, known_files, opts)
     assetstore = get_fsassetstore(gc)
-    count = 0
-    for file in walk_files(gc, opts, query={
-            'sha512': {'$exists': True}, 'imported': {'$exists': False},
-            'size': {'$exists': True, '$gte': opts.size}}):
-        adjust_to_import(gc, opts, assetstore, known_files, file)
-        count += 1
-        if time.time() - lastlog > 10 and opts.verbose >= 2:
-            print('Checked direct %d/%d files' % (len(known_files['path']), count))
-            lastlog = time.time()
-        if opts.verbose >= 2:
-            print('Checked direct %d/%d files' % (len(known_files['path']), count))
-    count = 0
-    for file in walk_files(gc, opts, query={
-            'sha512': {'$exists': True}, 'imported': {'$exists': True},
-            'size': {'$exists': True}}):
-        adjust_current_import(gc, opts, assetstore, known_files, file)
-        count += 1
-        if time.time() - lastlog > 10 and opts.verbose >= 2:
-            print('Checked import %d/%d files' % (len(known_files['path']), count))
-            lastlog = time.time()
-        if opts.verbose >= 2:
-            print('Checked import %d/%d files' % (len(known_files['path']), count))
+    if opts.direct:
+        count = 0
+        for file in walk_files(gc, opts, query={
+                'sha512': {'$exists': True}, 'imported': {'$exists': False},
+                'size': {'$exists': True, '$gte': opts.size}}):
+            adjust_to_import(gc, opts, assetstore, known_files, file)
+            count += 1
+            if time.time() - lastlog > 10 and opts.verbose >= 2:
+                print('Checked direct %d/%d files' % (len(known_files['path']), count))
+                lastlog = time.time()
+            if opts.verbose >= 2:
+                print('Checked direct %d/%d files' % (len(known_files['path']), count))
+    if opts.valid:
+        count = 0
+        for file in walk_files(gc, opts, query={
+                'sha512': {'$exists': True}, 'imported': {'$exists': True},
+                'size': {'$exists': True}}):
+            adjust_current_import(gc, opts, assetstore, known_files, file)
+            count += 1
+            if time.time() - lastlog > 10 and opts.verbose >= 2:
+                print('Checked import %d/%d files' % (len(known_files['path']), count))
+                lastlog = time.time()
+            if opts.verbose >= 2:
+                print('Checked import %d/%d files' % (len(known_files['path']), count))
+    if opts.assetstore:
+        check_assetstore(gc, opts)
