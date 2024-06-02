@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 
 import argparse
+import ctypes
 import os
-import subprocess
 import sys
-import tempfile
 
 import large_image
 import numpy as np
@@ -12,19 +11,10 @@ import PIL.Image
 import PIL.ImageOps
 
 
-def to_dots(clr, bw, usecolor):
-    out = ''
-    if isinstance(usecolor, dict):
-        if usecolor.get('last') == list(clr[:3]):
-            usecolor = False
-        else:
-            usecolor['last'] = list(clr[:3])
-    if usecolor or usecolor == {}:
-        out += f'\033[38;2;{clr[0]};{clr[1]};{clr[2]}m'
+def to_dots(bw):
     flat = bw.T.flatten()
     val = sum(2**idx if flat[idx] else 0 for idx in range(8))
-    out += chr(0x2800 + val)
-    return out
+    return chr(0x2800 + val)
 
 
 def to_blocks(blocks, usecolor, x, vblocks):
@@ -44,7 +34,7 @@ def to_blocks(blocks, usecolor, x, vblocks):
                f'\033[38;2;{vblocks[0][1][0]};{vblocks[0][1][1]};{vblocks[0][1][2]}m' +
                '\u2590')
     if usecolor is not None:
-        if usecolor.get('last', None) == out and x:
+        if usecolor.get('last', None) == out and x and usecolor['last'][-1:] == '\u2584':
             out = usecolor['last'][-1:]
         else:
             usecolor['last'] = out
@@ -54,6 +44,7 @@ def to_blocks(blocks, usecolor, x, vblocks):
 def main(opts):
     try:
         termw, termh = os.get_terminal_size()
+        termh -= 2
     except OSError:
         termw, termh = 80, 25
     if opts.width:
@@ -61,17 +52,11 @@ def main(opts):
     if opts.height:
         termh = opts.height
 
-    eight = False
     width = termw * 2
     height = termh * 4
     # aspect_ratio = 0.55 * 2
     aspect_ratio = 0.5 * 2
     color = opts.color
-
-    if opts.tiv:
-        width = height = max(termw, termh) * 8
-        aspect_ratio = 1
-    eight = opts.dots or not opts.color
 
     thumbw = width if aspect_ratio < 1 else int(width * aspect_ratio)
     thumbh = height if aspect_ratio > 1 else int(height / aspect_ratio)
@@ -91,39 +76,15 @@ def main(opts):
         charw, charh = thumbw // 2, int(thumbh * aspect_ratio) // 4
     else:
         charw, charh = int(thumbw / aspect_ratio) // 2, thumbh // 4
-    if eight:
-        dotw, doth = charw * 2, charh * 4
-    else:
-        dotw, doth = charw, charh * 2
+    dotw, doth = charw, charh * 2
+    if not opts.color:
+        dotw, doth = dotw * 2, doth * 2
 
     adjimg = PIL.ImageOps.autocontrast(img, cutoff=0.02)
     # adjimg = PIL.ImageOps.equalize(img)
     img = PIL.Image.blend(img, adjimg, opts.contrast)
 
-    if opts.tiv:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpfile = os.path.join(tmpdir, 'thumb.png')
-            img.save(tmpfile)
-            output = subprocess.check_output([
-                'tiv', '-w', str(termw), '-h', str(termh), '-0', tmpfile]).decode()
-            output = output.rstrip()
-        return output
-
-    if eight:
-        dotimg = img.resize((dotw, doth)).convert('1', dither=False)
-        charimg = img.convert('RGB').resize((charw, charh))
-
-        dots = np.array(dotimg)
-        chars = np.array(charimg)
-
-        lastcolor = {} if color else None
-
-        output = [
-            [to_dots(chars[y][x], dots[y * 4:y * 4 + 4, x * 2:x * 2 + 2], lastcolor)
-             for x in range(chars.shape[1])]
-            for y in range(chars.shape[0])
-        ]
-    else:
+    if opts.color:
         blockimg = np.array(img.convert('RGB').resize((dotw, doth)))
         vblockimg = np.array(img.convert('RGB').resize((dotw * 2, doth // 2)))
 
@@ -135,10 +96,19 @@ def main(opts):
              for x in range(blockimg.shape[1])]
             for y in range(0, blockimg.shape[0], 2)
         ]
-
-    output = '\033[39m\033[49m\n'.join(''.join(line) for line in output)
-    if color:
+        output = '\033[39m\033[49m\n'.join(''.join(line) for line in output)
         output += '\033[39m\033[49m'
+    else:
+        blockimg = img.convert('RGB').resize((dotw, doth))
+        palimg = np.array(blockimg.convert('P').quantize(
+            colors=2, method=PIL.Image.Quantize.MEDIANCUT,
+            dither=PIL.Image.Dither.FLOYDSTEINBERG))
+        output = [
+            [to_dots(1 - palimg[y:y + 4, x:x + 2])
+             for x in range(0, palimg.shape[1], 2)]
+            for y in range(0, palimg.shape[0], 4)
+        ]
+        output = '\n'.join(''.join(line) for line in output)
     return output
 
 
@@ -164,15 +134,14 @@ def command():
         help='Increase the contrast.  0 is no change, 1 is full.')
     parser.add_argument(
         '--use', help='Use a specific tile source.')
-    parser.add_argument(
-        '--dots', action='store_true', default=False,
-        help='Use small dots for outputting the image.')
-    parser.add_argument(
-        '--tiv', action='store_true', default=False,
-        help='Use tiv for outputting the image.')
     opts = parser.parse_args()
     result = main(opts)
     if result:
+        try:
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+        except Exception:
+            pass
         print(opts.source)
         sys.stdout.write(result + '\n')
 
