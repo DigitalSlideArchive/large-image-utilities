@@ -309,7 +309,7 @@ if __name__ == '__main__':  # noqa
             if time.time() - lastlog > 10 and opts.verbose >= 2:
                 print('Hashed %d/%d files' % (hashcount, count))
                 lastlog = time.time()
-        if opt.verbose >= 2:
+        if opts.verbose >= 2:
             print('Hashed %d/%d files' % (hashcount, count))
     known_files = {'len': {}, 'sha': {}, 'path': {}}
     if opts.direct or opts.valid:
@@ -328,19 +328,19 @@ if __name__ == '__main__':  # noqa
             if time.time() - lastlog > 10 and opts.verbose >= 2:
                 print('Checked direct %d/%d files' % (len(known_files['path']), count))
                 lastlog = time.time()
-            if opts.verbose >= 2:
-                print('Checked direct %d/%d files' % (len(known_files['path']), count))
+        if opts.verbose >= 2:
+            print('Checked direct %d/%d files' % (len(known_files['path']), count))
     if opts.valid:
         count = 0
         for file in walk_files(gc, opts, query={
-                'sha512': {'$exists': True}, 'imported': {'$exists': True},
+                'sha512': {'$exists': True}, 'imported': True,
                 'size': {'$exists': True}}):
             adjust_current_import(gc, opts, assetstore, known_files, file)
             count += 1
             if time.time() - lastlog > 10 and opts.verbose >= 2:
                 print('Checked import %d/%d files' % (len(known_files['path']), count))
                 lastlog = time.time()
-            if opts.verbose >= 2:
-                print('Checked import %d/%d files' % (len(known_files['path']), count))
+        if opts.verbose >= 2:
+            print('Checked import %d/%d files' % (len(known_files['path']), count))
     if opts.assetstore:
         check_assetstore(gc, opts)
