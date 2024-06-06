@@ -67,6 +67,8 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
                 print('set largeImage fileId')
                 gcd.delete(f'item/{ditem["_id"]}/tiles')
                 gcd.post(f'item/{ditem["_id"]}/tiles', parameters={'fileId': setli['_id']})
+        if opts.no_annot:
+            continue
         if opts.replace and len(gcd.get('annotation', parameters={'itemId': ditem['_id']})):
             gcd.delete(f'annotation/item/{ditem["_id"]}')
         if (not len(gcs.get('annotation', parameters={'itemId': sitem['_id']})) or
@@ -173,6 +175,7 @@ if __name__ == '__main__':
     parser.add_argument('--dest-password', help='Destination password.')
     parser.add_argument('--src-path', help='Source resource path.')
     parser.add_argument('--replace', action='store_true', help='Replace all annotations.')
+    parser.add_argument('--no-annot', action='store_true', help='Do not copy annotations.')
     parser.add_argument('--substr', help='All items must contain this substring.')
     parser.add_argument(
         '--dest-path', help='Destination resource path.  If the last '
