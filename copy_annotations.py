@@ -69,19 +69,28 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
                 gcd.post(f'item/{ditem["_id"]}/tiles', parameters={'fileId': setli['_id']})
         if opts.no_annot:
             continue
-        if opts.replace and len(gcd.get('annotation', parameters={'itemId': ditem['_id']})):
-            gcd.delete(f'annotation/item/{ditem["_id"]}')
-        if (not len(gcs.get('annotation', parameters={'itemId': sitem['_id']})) or
-                len(gcd.get('annotation', parameters={'itemId': ditem['_id']}))):
-            continue
         try:
-            print('get annotations')
-            ann = gcs.get('annotation/item/%s' % sitem['_id'], jsonResp=False).content
+            copy_annotations(opts, gcs, gcd, sitem, ditem)
         except Exception as e:
+            print('FAILED to copy annotations; disabling annotation copy')
             print(e)
-            continue
-        print('put annotations')
-        gcd.post('annotation/item/%s' % ditem['_id'], data=ann)
+            opts.no_annot = True
+
+
+def copy_annotations(opts, gcs, gcd, sitem, ditem):
+    if opts.replace and len(gcd.get('annotation', parameters={'itemId': ditem['_id']})):
+        gcd.delete(f'annotation/item/{ditem["_id"]}')
+    if (not len(gcs.get('annotation', parameters={'itemId': sitem['_id']})) or
+            len(gcd.get('annotation', parameters={'itemId': ditem['_id']}))):
+        return
+    try:
+        print('get annotations')
+        ann = gcs.get('annotation/item/%s' % sitem['_id'], jsonResp=False).content
+    except Exception as e:
+        print(e)
+        return
+    print('put annotations')
+    gcd.post('annotation/item/%s' % ditem['_id'], data=ann)
 
 
 def copy_data(opts):
