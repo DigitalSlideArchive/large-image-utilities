@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
 import argparse
+import functools
+import hashlib
 import json
 import logging
 import os
+import shutil
 import sys
 import tempfile
 import zipfile
@@ -115,7 +118,8 @@ def put_folders(gc, manifest, path, dryrun):
         if not dryrun:
             folder['doc'] = gc.createFolder(
                 parent['_id'], folder['name'],
-                folder.get('description') or '', 'folder', True, True)
+                folder.get('description') or '',
+                parent.get('_modelType', 'folder'), True, True)
             if len(folder.get('metadata', {})):
                 gc.post(
                     f'folder/{folder["doc"]["_id"]}/metadata',
@@ -146,7 +150,20 @@ def put_items(gc, manifest, path, dryrun):
                     headers={'X-HTTP-Method': 'PUT', 'Content-Type': 'application/json'})
 
 
-def put_files(gc, manifest, path, dryrun, tempdir, zf):
+@functools.lru_cache()
+def get_sha512(path):
+    sha = hashlib.sha512()
+    with open(path, 'rb') as f:
+        while True:
+            data = f.read(65536)
+            if not data:
+                break
+            sha.update(data)
+    sha = sha.hexdigest()
+    return sha
+
+
+def put_files(gc, manifest, path, dryrun, tempdir, zf, imported=None):
     """
     Upload files for a demo set.  This is idempotent.
 
@@ -157,7 +174,14 @@ def put_files(gc, manifest, path, dryrun, tempdir, zf):
     :param tempdir: a temporary directory for extracting files from the
         zipfile.
     :param zf: an open zipfile.
+    :param imported: if not None, a colon delimited specification to import
+        rather than upload files of the form (local path):(assetstore id):
+        (girder path).
     """
+    if imported and not dryrun:
+        localpath, assetstoreId, remotepath = imported.split(':')
+    else:
+        imported = None
     for file in manifest['file']:
         parentpath = os.path.join(path, file['parent'])
         logger.info(f'Creating file {parentpath}/{file["name"]}')
@@ -172,6 +196,22 @@ def put_files(gc, manifest, path, dryrun, tempdir, zf):
                 file['doc'] = gc.uploadFileToItem(
                     item['_id'], temppath, mimeType=file['mimeType'],
                     filename=file['name'])
+                if imported:
+                    os.makedirs(localpath, exist_ok=True)
+                    destname = file['name']
+                    destbase, destext = os.path.splitext(destname)
+                    destpath = os.path.join(localpath, destname)
+                    tempsha = get_sha512(temppath)
+                    num = 0
+                    while os.path.exists(destpath):
+                        if get_sha512(destpath) == tempsha:
+                            break
+                        num += 1
+                        destname = f'{destbase} ({num}){destext}'
+                        destpath = os.path.join(localpath, destname)
+                    shutil.copy(temppath, destpath)
+                    gc.post(f'file/{file["doc"]["_id"]}/import/adjust_path', parameters={
+                        'path': os.path.join(remotepath, destname)})
             os.unlink(temppath)
 
 
@@ -190,6 +230,8 @@ def put_mark_large_images(gc, manifest):
                     fileId = file['doc']['_id']
                     break
             if fileId:
+                if item['doc'].get('largeImage', {}).get('fileId') == fileId:
+                    continue
                 try:
                     gc.delete(f'item/{item["doc"]["_id"]}/tiles')
                 except Exception:
@@ -260,7 +302,7 @@ def put_annotations(gc, manifest, path, dryrun, tempdir, zf):
         os.unlink(temppath)
 
 
-def put_demo_set(gc, demo, path, dryrun=False):
+def put_demo_set(gc, demo, path, dryrun=False, imported=None):
     """
     Add a demo set to a Girder server.
 
@@ -268,6 +310,9 @@ def put_demo_set(gc, demo, path, dryrun=False):
     :param demo: a file path or URL of the demo set zip file.
     :param path: the destination Girder resource path to upload the demo to.
     :param dryrun: if True, report what would be done without doing it.
+    :param imported: if not None, a colon delimited specification to import
+        rather than upload files of the form (local path):(assetstore id):
+        (girder path).
     """
     with tempfile.TemporaryDirectory() as tempdir:
         if not os.path.exists(demo):
@@ -283,7 +328,7 @@ def put_demo_set(gc, demo, path, dryrun=False):
             path = path or manifest['destination']
             put_folders(gc, manifest, path, dryrun)
             put_items(gc, manifest, path, dryrun)
-            put_files(gc, manifest, path, dryrun, tempdir, zf)
+            put_files(gc, manifest, path, dryrun, tempdir, zf, imported)
             if not dryrun:
                 put_mark_large_images(gc, manifest)
             put_annotations(gc, manifest, path, dryrun, tempdir, zf)
@@ -540,6 +585,13 @@ if __name__ == '__main__':
         'creating a demo, this specifies the default destination path; if '
         'unset, it will be the create path.')
     parser.add_argument(
+        '--imported', help='Instead of uploading data files, store them in a '
+        'local directory and import them.  This requires using an admin user '
+        'to perform the import.  The parameter is a colon separated field of '
+        'the form (local path for storage):(assetstore id ):(girder path for '
+        'import).  All files are stored in the same directory with some basic '
+        'name deduplication.')
+    parser.add_argument(
         'demo', help='A zip file with the demo file set.  When adding a demo '
         'set to a system this may be a URL.')
     parser.add_argument(
@@ -566,4 +618,4 @@ if __name__ == '__main__':
         create_demo_set(gc, opts.create, opts.path, opts.demo, opts.max_files,
                         opts.overwrite)
     else:
-        put_demo_set(gc, opts.demo, opts.path, opts.dry_run)
+        put_demo_set(gc, opts.demo, opts.path, opts.dry_run, opts.imported)
