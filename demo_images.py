@@ -214,7 +214,7 @@ def put_annotations(gc, manifest, path, dryrun, tempdir, zf):
         zipfile.
     :param zf: an open zipfile.
     """
-    for aidx, annot in enumerate(manifest['annotations']):
+    for aidx, annot in enumerate(manifest['annotation']):
         try:
             item = gc.get('resource/lookup',
                           parameters={'path': os.path.join(path, annot['parent'])})
@@ -222,7 +222,7 @@ def put_annotations(gc, manifest, path, dryrun, tempdir, zf):
             if dryrun:
                 continue
             raise
-        count = len([a for a in manifest['annotations'][:aidx + 1]
+        count = len([a for a in manifest['annotation'][:aidx + 1]
                      if a['name'] == annot['name'] and a['parent'] == annot['parent']])
         annotList = gc.get('annotation', parameters={
             'itemId': item['_id'], 'name': annot['name'], 'limit': 0})
@@ -396,13 +396,13 @@ def create_add_annotations(gc, zf, manifest, base_path):
                                 folder = folder[0]
                             annItem = gc.getItem(record['elements'][0]['girderId'])
                             create_add_item(gc, zf, manifest, folder, annItem, base_path)
-                    manifest['annotations'].append({
+                    manifest['annotation'].append({
                         'name': record['name'],
                         'parent': os.path.join(item['parent'], item['name']),
                         'localpath': zfpath,
                     })
                 if hasGirder:
-                    manifest['annotations'][-1]['hasGirderReference'] = True
+                    manifest['annotation'][-1]['hasGirderReference'] = True
                 zf.write(temppath, zfpath)
 
 
@@ -467,7 +467,7 @@ def create_demo_set(gc, resource_path, target_path, dest_path, max_items=0,
                                 parameters={'type': folder['_modelType']}))
     logger.debug(f'Adding folder {folder["name"]}')
     manifest = {
-        'destination': target_path or os.path.dirname(resource_path),
+        'destination': os.path.dirname(target_path or resource_path),
         'folder': [{
             'model': folder['_modelType'],
             'parent': '',
@@ -478,16 +478,24 @@ def create_demo_set(gc, resource_path, target_path, dest_path, max_items=0,
         }],
         'item': [],
         'file': [],
-        'annotations': [],
+        'annotation': [],
     }
     with zipfile.ZipFile(
             dest_path, 'w' if overwrite else 'x',
             compression=zipfile.ZIP_DEFLATED) as zf:
         create_add_folder(gc, zf, manifest, folder, max_items, base_path)
         create_add_annotations(gc, zf, manifest, base_path)
+        orig = os.path.basename(resource_path)
+        dest = os.path.basename(target_path or resource_path)
+        if orig != dest and orig == manifest['folder'][0]['name']:
+            manifest['folder'][0]['name'] = dest
+            for rtype in {'folder', 'item', 'file', 'annotation'}:
+                for record in manifest[rtype]:
+                    if record['parent'].split(os.path.sep)[0] == orig:
+                        record['parent'] = os.path.sep.join(
+                            [dest] + record['parent'].split(os.path.sep)[1:])
         zf.writestr('manifest.yaml', yaml.dump(
             manifest, Dumper=IndentDumper, default_flow_style=False, sort_keys=False))
-        #     manifest, sort_keys=False))  # ##DWM::
 
 
 if __name__ == '__main__':
