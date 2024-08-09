@@ -3,8 +3,8 @@
 # pip install girder_client
 
 import argparse
-import json
 import hashlib
+import json
 import os
 import subprocess
 import time
@@ -83,14 +83,22 @@ def walk_files(gc, opts, baseFolder=None, query=None):  # noqa
                 yield file
 
 
-def scan_mount(base, known, opts):
+def scan_mount(base, known, opts, exclude=False):
     start = time.time()
     last = start
     for line in subprocess.Popen(['find', base], stdout=subprocess.PIPE).stdout:
         path = os.path.join(base, line[:-1].decode())
         flen = os.path.getsize(path)
-        known['len'].setdefault(flen, set())
-        known['len'][flen].add(path)
+        if exclude:
+            if flen not in known['len'] or path not in known['len'][flen]:
+                continue
+            known['len'][flen].pop(path)
+            if not len(known['len'][flen]):
+                known['len'].pop(flen)
+        else:
+            # Use dictionaries, not sets, so that they are ordered
+            known['len'].setdefault(flen, {})
+            known['len'][flen][path] = True
         if time.time() - last > 10 and opts.verbose >= 2:
             print('  %3.5fs - %d distinct lengths, %d files' % (
                 time.time() - start, len(known['len']),
@@ -154,6 +162,15 @@ def adjust_to_import(gc, opts, assetstore, known, file):
     if not file.get('imported') and file['size'] >= opts.size:
         path = match_sha(file, known, opts)
         if not path:
+            return
+        if opts.verbose >= 1:
+            print('Move %s (%s) to %s' % (file['name'], file['_id'], path))
+        gc.post(f'file/{file["_id"]}/import/adjust_path', parameters={'path': path})
+    elif file.get('imported') and 'path' in file and file.get('size'):
+        if file['size'] in known['len'] and list(known['len'][file['size']])[0] == file['path']:
+            return
+        path = match_sha(file, known, opts)
+        if not path or file['path'] == path:
             return
         if opts.verbose >= 1:
             print('Move %s (%s) to %s' % (file['name'], file['_id'], path))
@@ -274,6 +291,10 @@ if __name__ == '__main__':  # noqa
         help='Mounted directories that a file system assetstore should use '
         'for adjustment.')
     parser.add_argument(
+        '--exclude', action='append',
+        help='Mounted directories to exclude from cataloged data used in '
+        'adjustment.  All excludes are processed after all mounts.')
+    parser.add_argument(
         '--size', type=int, default=100000,
         help='Minimum size of a file to remove from uploads and move to imports')
     parser.add_argument(
@@ -289,6 +310,11 @@ if __name__ == '__main__':  # noqa
         '--valid', default=True, action='store_true',
         help='Check if import paths are still valid or have moved (default).')
     parser.add_argument('--no-valid', dest='valid', action='store_false')
+    parser.add_argument(
+        '--earlier', default=True, action='store_true',
+        help='Make imported file references point to the first listed such '
+        'reference (default).')
+    parser.add_argument('--no-earlier', dest='earlier', action='store_false')
     parser.add_argument('--reverse', action='store_true')
     parser.add_argument(
         '--filter', help='Only process users and collections that match this string')
@@ -312,11 +338,15 @@ if __name__ == '__main__':  # noqa
         if opts.verbose >= 2:
             print('Hashed %d/%d files' % (hashcount, count))
     known_files = {'len': {}, 'sha': {}, 'path': {}}
-    if opts.direct or opts.valid:
+    if opts.direct or opts.valid or opts.earlier:
         for mount in opts.mount:
             if opts.verbose >= 2:
                 print('Scanning %s' % mount)
             scan_mount(mount, known_files, opts)
+        for mount in opts.exclude:
+            if opts.verbose >= 2:
+                print('Scanning %s for exclusion' % mount)
+            scan_mount(mount, known_files, opts, True)
     assetstore = get_fsassetstore(gc)
     if opts.direct:
         count = 0
@@ -330,6 +360,18 @@ if __name__ == '__main__':  # noqa
                 lastlog = time.time()
         if opts.verbose >= 2:
             print('Checked direct %d/%d files' % (len(known_files['path']), count))
+    if opts.earlier:
+        count = 0
+        for file in walk_files(gc, opts, query={
+                'sha512': {'$exists': True}, 'imported': {'$exists': True},
+                'size': {'$exists': True}, 'path': {'$exists': True}}):
+            adjust_to_import(gc, opts, assetstore, known_files, file)
+            count += 1
+            if time.time() - lastlog > 10 and opts.verbose >= 2:
+                print('Checked earlier %d/%d files' % (len(known_files['path']), count))
+                lastlog = time.time()
+        if opts.verbose >= 2:
+            print('Checked earlier %d/%d files' % (len(known_files['path']), count))
     if opts.valid:
         count = 0
         for file in walk_files(gc, opts, query={
