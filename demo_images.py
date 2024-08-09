@@ -111,10 +111,11 @@ def put_folders(gc, manifest, path, dryrun):
     :param path: the base girder resource path for placement.
     :param dryrun: if True, don't actually create anything.
     """
-    for folder in manifest['folder']:
+    for fidx, folder in enumerate(manifest['folder']):
         parent = find_or_create_path(
             gc, parentpath := os.path.join(path, folder['parent']), dryrun)
-        logger.info(f'Creating folder {parentpath}/{folder["name"]}')
+        logger.info(f'Creating folder {fidx + 1}/{len(manifest["folder"])} '
+                    f'{parentpath}/{folder["name"]}')
         if not dryrun:
             folder['doc'] = gc.createFolder(
                 parent['_id'], folder['name'],
@@ -136,10 +137,11 @@ def put_items(gc, manifest, path, dryrun):
     :param path: the base girder resource path for placement.
     :param dryrun: if True, don't actually create anything.
     """
-    for item in manifest['item']:
+    for iidx, item in enumerate(manifest['item']):
         parent = find_or_create_path(
             gc, parentpath := os.path.join(path, item['parent']), dryrun)
-        logger.info(f'Creating item {parentpath}/{item["name"]}')
+        logger.info(f'Creating item {iidx + 1}/{len(manifest["item"])} '
+                    f'{parentpath}/{item["name"]}')
         if not dryrun:
             item['doc'] = gc.createItem(
                 parent['_id'], item['name'], item['description'], True)
@@ -182,9 +184,10 @@ def put_files(gc, manifest, path, dryrun, tempdir, zf, imported=None):
         localpath, assetstoreId, remotepath = imported.split(':')
     else:
         imported = None
-    for file in manifest['file']:
+    for fidx, file in enumerate(manifest['file']):
         parentpath = os.path.join(path, file['parent'])
-        logger.info(f'Creating file {parentpath}/{file["name"]}')
+        logger.info(f'Creating file {fidx + 1}/{len(manifest["file"])} '
+                    f'{parentpath}/{file["name"]}')
         if not dryrun:
             item = gc.get('resource/lookup', parameters={'path': parentpath})
             temppath = os.path.join(tempdir, 'datafile')
@@ -222,7 +225,7 @@ def put_mark_large_images(gc, manifest):
     :param gc: authenticated girder client.
     :param manifest: the manifest listing the items.
     """
-    for item in manifest['item']:
+    for iidx, item in enumerate(manifest['item']):
         if 'largeImage' in item:
             fileId = None
             for file in manifest['file']:
@@ -230,8 +233,11 @@ def put_mark_large_images(gc, manifest):
                     fileId = file['doc']['_id']
                     break
             if fileId:
+                item['doc'] = gc.getItem(item['doc']['_id'])
                 if item['doc'].get('largeImage', {}).get('fileId') == fileId:
                     continue
+                logger.info(f'Marking large image {iidx + 1}/{len(manifest["item"])} '
+                            f'{item["name"]}')
                 try:
                     gc.delete(f'item/{item["doc"]["_id"]}/tiles')
                 except Exception:
@@ -273,7 +279,8 @@ def put_annotations(gc, manifest, path, dryrun, tempdir, zf):
         filename = os.path.basename(annot['localpath'])
         temppath = os.path.join(tempdir, filename)
         zip_to_file(zf, annot['localpath'], temppath)
-        logger.info(f'Creating annotation for {item["name"]}')
+        logger.info(f'Creating annotation {aidx + 1}/{len(manifest["annotation"])} '
+                    f'for {item["name"]}')
         if dryrun:
             continue
         if annot.get('hasGirderReference'):
