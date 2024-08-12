@@ -86,7 +86,8 @@ def walk_files(gc, opts, baseFolder=None, query=None):  # noqa
 def scan_mount(base, known, opts, exclude=False):
     start = time.time()
     last = start
-    for line in subprocess.Popen(['find', base], stdout=subprocess.PIPE).stdout:
+    for line in subprocess.Popen(['find', base, '-type', 'f'],
+                                 stdout=subprocess.PIPE).stdout:
         path = os.path.join(base, line[:-1].decode())
         flen = os.path.getsize(path)
         if exclude:
@@ -223,7 +224,8 @@ def check_assetstore(gc, opts):
     last = start
     checked = 0
     removed = 0
-    for line in subprocess.Popen(['find', basepath], stdout=subprocess.PIPE).stdout:
+    for line in subprocess.Popen(['find', basepath, '-type', 'f'],
+                                 stdout=subprocess.PIPE).stdout:
         path = line.decode().rstrip()
         if not path.startswith(basepath):
             continue
