@@ -193,6 +193,25 @@ def write(info, name, destName, compression):
         convert_to_ndpi(destName)
 
 
+def generate_imagej_if_needed(info, destName, compression):
+    if compression == 'none' and len(info['ifds']) == 1:
+        try:
+            desc = info['ifds'][0]['tags'][tifftools.Tag.ImageDescription.value]['data']
+            if desc.startswith('ImageJ'):
+                ijdict = {line.split('=', 1)[0]: line.split('=', 1)[1].strip()
+                          for line in desc.split('\n') if '=' in line}
+                if int(ijdict['images']) > 1:
+                    framelen = sum(info['ifds'][0]['tags'][
+                        tifftools.Tag.StripByteCounts.value]['data'])
+                    count = framelen * (int(ijdict['images']) - 1)
+                    chunk = 65536
+                    with open(destName, 'ab') as fptr:
+                        for pos in range(0, count, chunk):
+                            fptr.write(b'\x00' * min(chunk, count - pos))
+        except Exception:
+            pass
+
+
 def main(sourceName, destName, compression):  # noqa
     currentName = None
     info = {}
@@ -333,6 +352,7 @@ def main(sourceName, destName, compression):  # noqa
                 }
     if len(info):
         write(info, currentName, destName, compression)
+        generate_imagej_if_needed(info, destName, compression)
 
 
 def command():
@@ -341,7 +361,8 @@ def command():
     parser.add_argument('out', type=str, help='Output image filename')
     parser.add_argument(
         '--compression', default='packbits',
-        help='One of "packbits", "none" to use for the output.')
+        help='One of "packbits", "none" to use for the output.  If trying to '
+        'recreate an ImageJ file, use "none".')
     opts = parser.parse_args()
     main(opts.source, opts.out, opts.compression)
 
