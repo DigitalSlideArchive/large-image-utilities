@@ -31,7 +31,7 @@ def scan_dataset(v, analyze, showattrs, sample, empty, indent):
         empty = empty + 1 if empty is not True else 0
     print('%s - %s %s %r %r %s' % (
         '  ' * (indent + 1), v.name, v.dtype, v.shape,
-        v.chunks, v.compressor.cname))
+        v.chunks, v.compressor.cname if v.compressor else ''))
     if showattrs:
         show_attrs(v, indent + 1)
     if v.dtype.kind in {'f', 'i', 'u'} and empty is not False:

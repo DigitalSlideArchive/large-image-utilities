@@ -127,6 +127,7 @@ Then open a web browser to port 8000.  You can run with the `--use_external_proc
 
 - Sampling
 - Can connect to a running instance
+- python <= 3.11
 
 ### Command
 
@@ -179,3 +180,21 @@ See a distribution of allocations by binned logarithmic sizes
 ```
 memray stats memrayout.bin
 ```
+
+## pystack
+
+- Show the stack trace of every thread in a running python process 
+
+### Command
+
+```
+pystack remote `pidof lisource_compare`
+```
+
+Without `--no-block`, the running process will be paused until the stack trace completes, but often pystack won't work with the `--no-block` option.
+
+The `--native` option will show what libraries are running (e.g., the .so that is running).
+
+The `--locals` option shows a repr of local variables in each stack frame.  This is often terse (e.g., dictionaries may only show a few entries).
+The `--no-block` option , `--native`, and `--locals` options.  
+

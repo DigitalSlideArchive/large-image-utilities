@@ -245,9 +245,9 @@ def put_mark_large_images(gc, manifest):
                 gc.post(f'item/{item["doc"]["_id"]}/tiles', parameters={'fileId': fileId})
 
 
-def put_annotations(gc, manifest, path, dryrun, tempdir, zf):
+def put_annotations(gc, manifest, path, dryrun, tempdir, zf):  # noqa
     """
-    Upload annoations for a demo set.  If the annotation is smaller than a
+    Upload annotations for a demo set.  If the annotation is smaller than a
     certain size, it is posted directly to the item.  Larger annotations are
     uploaded as files with references to their parent and take some time to be
     ingested into the system.  This attempts to be idempotent based on
@@ -284,7 +284,7 @@ def put_annotations(gc, manifest, path, dryrun, tempdir, zf):
         if dryrun:
             continue
         if annot.get('hasGirderReference'):
-            record = json.load(open(temppath, 'r'))
+            record = json.load(open(temppath))
             for el in record['elements']:
                 if 'girderId' in el:
                     for matched in manifest['item']:
@@ -292,9 +292,18 @@ def put_annotations(gc, manifest, path, dryrun, tempdir, zf):
                             el['girderId'] = matched['doc']['_id']
                             break
                     else:
-                        raise Exception('No matching uploaded girderId')
+                        msg = 'No matching uploaded girderId'
+                        raise Exception(msg)
             json.dump(record, open(temppath, 'w'))
         if 'largeImage' in item and os.path.getsize(temppath) > 1024 ** 2:
+            userId = None
+            user = gc.get('user/me')
+            if user:
+                userId = user['_id']
+            else:
+                token = gc.get('token/current')
+                if token:
+                    userId = token['userId']
             gc.uploadFileToItem(
                 item['_id'], temppath, mimeType='application/json',
                 filename=filename,
@@ -302,7 +311,7 @@ def put_annotations(gc, manifest, path, dryrun, tempdir, zf):
                     'identifier': 'LargeImageAnnotationUpload',
                     'itemId': item['_id'],
                     'fileId': item['largeImage']['fileId'],
-                    'userId': gc.get('user/me')['_id'],
+                    'userId': userId,
                 }, separators=(',', ':')))
         else:
             gc.post('annotation/item/%s' % item['_id'], data=open(temppath, 'rb').read())
@@ -324,6 +333,7 @@ def put_demo_set(gc, demo, path, dryrun=False, imported=None):
     with tempfile.TemporaryDirectory() as tempdir:
         if not os.path.exists(demo):
             dest = os.path.join(tempdir, 'temp.zip')
+            logger.info(f'Downloading {demo}')
             with requests.get(demo, stream=True) as r:
                 r.raise_for_status()
                 with open(dest, 'wb') as f:
@@ -514,7 +524,8 @@ def create_demo_set(gc, resource_path, target_path, dest_path, max_items=0,
     resource_path = resource_path.rstrip('/')
     folder = gc.get('resource/lookup', parameters={'path': resource_path})
     if folder['_modelType'] not in {'folder', 'collection'}:
-        raise Exception('A demo set can only be made from a folder or collection.')
+        msg = 'A demo set can only be made from a folder or collection.'
+        raise Exception(msg)
     base_path = os.path.dirname(gc.get(f'resource/{folder["_id"]}/path',
                                 parameters={'type': folder['_modelType']}))
     logger.debug(f'Adding folder {folder["name"]}')
@@ -603,7 +614,7 @@ if __name__ == '__main__':
         'set to a system this may be a URL.')
     parser.add_argument(
         '--dry-run', '-n', action='store_true', help='Report what would be '
-        'uploaded, but do not actually fo anything.  This has no effect when '
+        'uploaded, but do not actually do anything.  This has no effect when '
         'creating a demo set.')
     parser.add_argument(
         '--create', help='Create a demo set.  This is the resource path of '
@@ -618,7 +629,7 @@ if __name__ == '__main__':
     opts = parser.parse_args()
     logger.setLevel(max(1, logging.WARNING - (opts.verbose - opts.silent) * 10))
     logger.addHandler(logging.StreamHandler(sys.stderr))
-    logger.debug('Parsed arguments: %r' % opts)
+    logger.debug('Parsed arguments: %r', opts)
     gc = get_girder_client(vars(opts))
 
     if opts.create:
