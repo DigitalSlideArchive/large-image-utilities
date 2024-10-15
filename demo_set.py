@@ -387,6 +387,11 @@ def put_demo_set(gc, demo, path, dryrun=False, imported=None):
             demo = dest
         with zipfile.ZipFile(demo, 'r') as zf:
             manifest = yaml.safe_load(zf.read('manifest.yaml'))
+            if manifest.get('name'):
+                logger.info(f'Name: {manifest["name"]}')
+            if manifest.get('description'):
+                logger.info('Description:')
+                logger.info(manifest['description'])
             path = path or manifest['destination']
             put_folders(gc, manifest, path, dryrun)
             put_items(gc, manifest, path, dryrun)
@@ -561,7 +566,8 @@ def create_add_folder(gc, zf, manifest, folder, max_items, base_path, filter):
 
 
 def create_demo_set(gc, resource_path, target_path, dest_path, max_items=0,
-                    filter=None, cli=None, overwrite=False):
+                    filter=None, cli=None, name=None, description=None,
+                    overwrite=False):
     """
     Create a zip file containing a manifest file, data files, and annotation
     files.
@@ -587,6 +593,8 @@ def create_demo_set(gc, resource_path, target_path, dest_path, max_items=0,
                                 parameters={'type': folder['_modelType']}))
     logger.debug(f'Adding folder {folder["name"]}')
     manifest = {
+        'name': name or f'Demo Set of {folder["name"]}',
+        'description': description or '',
         'destination': os.path.dirname(target_path or resource_path),
         'folder': [{
             'model': folder['_modelType'],
@@ -615,6 +623,8 @@ def create_demo_set(gc, resource_path, target_path, dest_path, max_items=0,
                     if record['parent'].split(os.path.sep)[0] == orig:
                         record['parent'] = os.path.sep.join(
                             [dest] + record['parent'].split(os.path.sep)[1:])
+        if not manifest['description']:
+            manifest['description'] = f'{len(manifest["items"])} items'
         zf.writestr('manifest.yaml', yaml.dump(
             manifest, Dumper=IndentDumper, default_flow_style=False, sort_keys=False))
 
@@ -679,6 +689,10 @@ if __name__ == '__main__':
         'the containing folder, user, or collection and the demo file is the '
         'destination file (it cannot be a URL).')
     parser.add_argument(
+        '--name', help='Add a name when creating a demo set.')
+    parser.add_argument(
+        '--description', help='Add a description when creating a demo set.')
+    parser.add_argument(
         '--filter', help='A regex that is applied to resource paths during '
         'creation.  Only sub resource paths below the containing document '
         'that validate with this regex are added.')
@@ -699,6 +713,7 @@ if __name__ == '__main__':
 
     if opts.create:
         create_demo_set(gc, opts.create, opts.path, opts.demo, opts.max_files,
-                        opts.filter, opts.cli, opts.overwrite)
+                        opts.filter, opts.cli, opts.name, opts.description,
+                        opts.overwrite)
     else:
         put_demo_set(gc, opts.demo, opts.path, opts.dry_run, opts.imported)
