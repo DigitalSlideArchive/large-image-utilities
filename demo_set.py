@@ -664,7 +664,7 @@ if __name__ == '__main__':
         '--imported', help='Instead of uploading data files, store them in a '
         'local directory and import them.  This requires using an admin user '
         'to perform the import.  The parameter is a colon separated field of '
-        'the form (local path for storage):(assetstore id ):(girder path for '
+        'the form (local path for storage):(assetstore id):(girder path for '
         'import).  All files are stored in the same directory with some basic '
         'name deduplication.')
     parser.add_argument(
