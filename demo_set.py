@@ -6,9 +6,11 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
+import time
 import zipfile
 
 import girder_client.cli
@@ -318,6 +320,49 @@ def put_annotations(gc, manifest, path, dryrun, tempdir, zf):  # noqa
         os.unlink(temppath)
 
 
+def wait_for_job(gc, job):
+    """
+    Wait for a job to complete.
+
+    :param gc: the girder client.
+    :param job: a girder job.
+    :return: the updated girder job.
+    """
+    lastdot = time.time()
+    jobId = job['_id']
+    while job['status'] not in (3, 4, 5):
+        if time.time() - lastdot >= 5:
+            logger.debug('.')
+            lastdot = time.time()
+        time.sleep(0.25)
+        job = gc.get('job/%s' % jobId)
+    if job['status'] == 3:
+        logger.debug(' done')
+    else:
+        logger.error(' failed')
+    return job
+
+
+def put_clis(gc, manifest, dryrun):  # noqa
+    """
+    Upload docker image clis.
+
+    :param gc: authenticated girder client.
+    :param manifest: the manifest listing the clis.
+    :param dryrun: if True, don't actually create anything.
+    """
+    if manifest.get('cli') is None:
+        return
+    for cli in manifest['cli']:
+        logger.info('Adding cli %s ' % cli)
+        gc.put('slicer_cli_web/docker_image', data={'name': '["%s"]' % cli})
+        job = gc.get('job/all', parameters={
+            'sort': 'created', 'sortdir': -1,
+            'types': '["slicer_cli_web_job"]',
+            'limit': 1})[0]
+        wait_for_job(gc, job)
+
+
 def put_demo_set(gc, demo, path, dryrun=False, imported=None):
     """
     Add a demo set to a Girder server.
@@ -349,9 +394,10 @@ def put_demo_set(gc, demo, path, dryrun=False, imported=None):
             if not dryrun:
                 put_mark_large_images(gc, manifest)
             put_annotations(gc, manifest, path, dryrun, tempdir, zf)
+            put_clis(gc, manifest, dryrun)
 
 
-def create_add_item(gc, zf, manifest, folder, item, base_path):
+def create_add_item(gc, zf, manifest, folder, item, base_path, filter=None):
     """
     Add an item all of its files to a demo set.
 
@@ -362,6 +408,7 @@ def create_add_item(gc, zf, manifest, folder, item, base_path):
     :param item: the girder item document to add.
     :param base_path: the girder resource path to use as the context of
         relative paths.
+    :param filter: an optional regex that must validate to store the item.
     """
     if '_modelType' in folder:
         folder_path = gc.get(f'resource/{folder.get("_id", folder.get("originalId"))}/path',
@@ -371,8 +418,15 @@ def create_add_item(gc, zf, manifest, folder, item, base_path):
                        os.path.join(folder['parent'], folder['name']).strip('/'))
     else:
         parent_path = os.path.join(folder['parent'], folder['name']).strip('/')
-    logger.debug(f'Adding item {len(manifest["item"]) + 1} {parent_path}/{item["name"]}')
     dirname = f'item{len(manifest["item"])}'
+    item_path = gc.get(f'resource/{item["_id"]}/path', parameters={'type': 'item'})
+    item_path = (item_path[len(base_path):].strip('/')
+                 if item_path.startswith(base_path) else
+                 os.path.join(parent_path, item['name']).strip('/'))
+    if filter and not re.search(filter, item_path):
+        logger.debug('Filtering out %s', item_path)
+        return
+    logger.debug(f'Adding item {len(manifest["item"]) + 1} {parent_path}/{item["name"]}')
     manifest['item'].append({
         'model': 'item',
         'parent': parent_path,
@@ -385,10 +439,6 @@ def create_add_item(gc, zf, manifest, folder, item, base_path):
     if 'largeImage' in item and 'expected' not in item['largeImage']:
         manifest['item'][-1]['largeImage'] = item['largeImage']['fileId']
     zf.mkdir(dirname)
-    item_path = gc.get(f'resource/{item["_id"]}/path', parameters={'type': 'item'})
-    item_path = (item_path[len(base_path):].strip('/')
-                 if item_path.startswith(base_path) else
-                 os.path.join(parent_path, item['name']).strip('/'))
     with tempfile.TemporaryDirectory() as tempdir:
         for file in gc.listFile(item['_id']):
             logger.info(f'Adding file {parent_path}/{item["name"]}/{file["name"]}')
@@ -468,7 +518,7 @@ def create_add_annotations(gc, zf, manifest, base_path):
                 zf.write(temppath, zfpath)
 
 
-def create_add_folder(gc, zf, manifest, folder, max_items, base_path):
+def create_add_folder(gc, zf, manifest, folder, max_items, base_path, filter):
     """
     Add a folder and all of its subfolders and items to a demo set.
 
@@ -480,22 +530,26 @@ def create_add_folder(gc, zf, manifest, folder, max_items, base_path):
         added.
     :param base_path: the girder resource path to use as the context of
         relative paths.
+    :param filter: an optional regex that must validate to store the folder.
     """
     folder_path = gc.get(f'resource/{folder["_id"]}/path',
                          parameters={'type': folder['_modelType']})
     parent_path = (folder_path[len(base_path):].strip('/')
                    if folder_path.startswith(base_path) else folder_path)
+    if filter and not re.search(filter, parent_path):
+        logger.debug('Filtering out %s', parent_path)
+        return
     if max_items and len(manifest['item']) >= max_items:
         return
     if folder['_modelType'] == 'folder':
         for item in gc.listItem(folder['_id']):
             if max_items and len(manifest['item']) >= max_items:
                 return
-            create_add_item(gc, zf, manifest, folder, item, base_path)
+            create_add_item(gc, zf, manifest, folder, item, base_path, filter)
     for subfolder in gc.listFolder(folder['_id'], folder['_modelType']):
         if max_items and len(manifest['item']) >= max_items:
             return
-        logger.debug(f'Adding folder {parent_path}/{folder["name"]}')
+        logger.debug(f'Adding folder {parent_path}')
         manifest['folder'].append({
             'model': 'folder',
             'parent': parent_path,
@@ -503,11 +557,11 @@ def create_add_folder(gc, zf, manifest, folder, max_items, base_path):
             'description': subfolder.get('description'),
             'metadata': subfolder.get('meta', {}),
         })
-        create_add_folder(gc, zf, manifest, subfolder, max_items, base_path)
+        create_add_folder(gc, zf, manifest, subfolder, max_items, base_path, filter)
 
 
 def create_demo_set(gc, resource_path, target_path, dest_path, max_items=0,
-                    overwrite=False):
+                    filter=None, cli=None, overwrite=False):
     """
     Create a zip file containing a manifest file, data files, and annotation
     files.
@@ -519,6 +573,9 @@ def create_demo_set(gc, resource_path, target_path, dest_path, max_items=0,
     :param max_items: if non-zero, stop after this many primary items are
         added.  There may be more items than this in order to have complete
         annotations.
+    :param filter: if not None, a regex that is applied to resource paths
+        during creation.  Only sub resource paths below the containing document
+        that validate with this regex are added.
     :param overwrite: if False and dest_path exists, raise an error.
     """
     resource_path = resource_path.rstrip('/')
@@ -542,11 +599,12 @@ def create_demo_set(gc, resource_path, target_path, dest_path, max_items=0,
         'item': [],
         'file': [],
         'annotation': [],
+        'cli': cli if cli else [],
     }
     with zipfile.ZipFile(
             dest_path, 'w' if overwrite else 'x',
             compression=zipfile.ZIP_DEFLATED) as zf:
-        create_add_folder(gc, zf, manifest, folder, max_items, base_path)
+        create_add_folder(gc, zf, manifest, folder, max_items, base_path, filter)
         create_add_annotations(gc, zf, manifest, base_path)
         orig = os.path.basename(resource_path)
         dest = os.path.basename(target_path or resource_path)
@@ -621,8 +679,15 @@ if __name__ == '__main__':
         'the containing folder, user, or collection and the demo file is the '
         'destination file (it cannot be a URL).')
     parser.add_argument(
+        '--filter', help='A regex that is applied to resource paths during '
+        'creation.  Only sub resource paths below the containing document '
+        'that validate with this regex are added.')
+    parser.add_argument(
         '--max-files', type=int, help='The maximum number of files to add '
         'when creating a demo set.  Default is unlimited.')
+    parser.add_argument(
+        '--cli', action='append', help='A slicer_cli_web cli docker image to '
+        'include in a created manifest.')
     parser.add_argument(
         '--overwrite', '-y', action='store_true',
         help='Allow overwriting an existing output file.')
@@ -634,6 +699,6 @@ if __name__ == '__main__':
 
     if opts.create:
         create_demo_set(gc, opts.create, opts.path, opts.demo, opts.max_files,
-                        opts.overwrite)
+                        opts.filter, opts.cli, opts.overwrite)
     else:
         put_demo_set(gc, opts.demo, opts.path, opts.dry_run, opts.imported)
