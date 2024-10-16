@@ -554,7 +554,11 @@ def create_add_folder(gc, zf, manifest, folder, max_items, base_path, filter):
     for subfolder in gc.listFolder(folder['_id'], folder['_modelType']):
         if max_items and len(manifest['item']) >= max_items:
             return
-        logger.debug(f'Adding folder {parent_path}')
+        folder_path = f'{parent_path}/{subfolder["name"]}'
+        if filter and not re.search(filter, folder_path):
+            logger.debug('Filtering out %s', folder_path)
+            continue
+        logger.debug(f'Adding folder {parent_path}/{subfolder["name"]}')
         manifest['folder'].append({
             'model': 'folder',
             'parent': parent_path,
