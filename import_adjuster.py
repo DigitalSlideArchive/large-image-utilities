@@ -12,6 +12,26 @@ import time
 import girder_client
 import girder_client.cli
 
+origgcRequestFunc = girder_client.GirderClient._requestFunc
+
+
+def gcRequestFunc(self, method):
+    orig = origgcRequestFunc(self, method)
+
+    def f(*args, **kwargs):
+        result = orig(*args, **kwargs)
+        try:
+            if result.ok and int(result.headers.get('girder-total-count')) > 100:
+                print('Count: ' + result.headers.get('girder-total-count'))
+        except Exception:
+            pass
+        return result
+
+    return f
+
+
+girder_client.GirderClient._requestFunc = gcRequestFunc
+
 
 def generate_hash(gc, opts, file):
     if file.get('sha512') or file.get('linkUrl'):
