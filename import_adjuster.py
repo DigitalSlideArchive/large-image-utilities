@@ -6,31 +6,20 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
+import sys
 import time
 
 import girder_client
 import girder_client.cli
+from tqdm import tqdm
 
-origgcRequestFunc = girder_client.GirderClient._requestFunc
-
-
-def gcRequestFunc(self, method):
-    orig = origgcRequestFunc(self, method)
-
-    def f(*args, **kwargs):
-        result = orig(*args, **kwargs)
-        try:
-            if result.ok and int(result.headers.get('girder-total-count')) > 100:
-                print('Count: ' + result.headers.get('girder-total-count'))
-        except Exception:
-            pass
-        return result
-
-    return f
+girder_client.DEFAULT_PAGE_LIMIT = 50000
 
 
-girder_client.GirderClient._requestFunc = gcRequestFunc
+def clear_line():
+    sys.stdout.write('\r' + (' ' * (shutil.get_terminal_size()[0])) + '\r')
 
 
 def generate_hash(gc, opts, file):
@@ -38,11 +27,13 @@ def generate_hash(gc, opts, file):
         return 0
     path = gc.get(f'resource/{file["_id"]}/path', parameters={'type': 'file'})
     if opts.verbose >= 2:
+        clear_line()
         print(f'Getting hash for {path}')
     try:
         gc.post(f'file/{file["_id"]}/hashsum')
     except Exception:
         if opts.verbose >= 1:
+            clear_line()
             print(f'--> Cannot get hash of {path} ({file})')
         return 0
     return 1
@@ -106,10 +97,25 @@ def walk_files(gc, opts, baseFolder=None, query=None):  # noqa
 def scan_mount(base, known, opts, exclude=False):
     start = time.time()
     last = start
-    for line in subprocess.Popen(['find', base, '-type', 'f'],
-                                 stdout=subprocess.PIPE).stdout:
-        path = os.path.join(base, line[:-1].decode())
-        flen = os.path.getsize(path)
+    lengths = {}
+    for bpath, dirs, files in os.walk(base):
+        # sorting by inode speeds up walks
+        dirstats = sorted(
+            (os.stat(os.path.join(base, bpath, dirname)).st_ino, dirname)
+            for dirname in dirs)
+        dirs[:] = [dirstat[1] for dirstat in dirstats]
+        for filename in files:
+            path = os.path.join(base, bpath, filename)
+            flen = os.stat(path).st_size
+            lengths[path] = flen
+        if time.time() - last > 10 and opts.verbose >= 2:
+            print('  %3.5fs - %d distinct lengths, %d:%d files' % (
+                time.time() - start, len(known['len']),
+                sum(len(x) for x in known['len'].values()),
+                len(lengths)))
+            last = time.time()
+    for path in sorted(lengths):
+        flen = lengths[path]
         if exclude:
             if flen not in known['len'] or path not in known['len'][flen]:
                 continue
@@ -125,20 +131,8 @@ def scan_mount(base, known, opts, exclude=False):
                 time.time() - start, len(known['len']),
                 sum(len(x) for x in known['len'].values())))
             last = time.time()
-    """
-    for root, _dirs, files in os.walk(base):
-        for file in files:
-            path = os.path.join(base, root, file)
-            flen = os.path.getsize(path)
-            known['len'].setdefault(flen, set())
-            known['len'][flen].add(path)
-            if time.time() - last > 10 and opts.verbose >= 2:
-                print('  %3.5fs - %d distinct lengths, %d files' % (
-                    time.time() - start, len(known['len']),
-                    sum(len(x) for x in known['len'].values())))
-                last = time.time()
-    """
     if opts.verbose >= 2:
+        clear_line()
         print('  %3.5fs - %d distinct lengths, %d files' % (
             time.time() - start, len(known['len']),
             sum(len(x) for x in known['len'].values())))
@@ -157,8 +151,21 @@ def match_sha(file, known, opts):
     if file['size'] not in known['len']:
         return
     for path in known['len'][file['size']]:
-        if path not in known['path']:
+        if path == file.get('path'):
+            known['path'][file['path']] = file['sha512']
+            known['sha'][file['sha512']] = file['path']
+            return file['path']
+        if path in known['path']:
+            sha = known['path'][path]
+            if sha not in known['sha']:
+                known['sha'][sha] = path
+            if file['sha512'] == sha:
+                return path
+        else:
+            if not os.path.isfile(path):
+                continue
             if opts.verbose >= 3:
+                clear_line()
                 print('    Getting sha for %s' % path)
             sha = hashlib.sha512()
             with open(path, 'rb') as f:
@@ -169,7 +176,8 @@ def match_sha(file, known, opts):
                     sha.update(data)
             sha = sha.hexdigest()
             known['path'][path] = sha
-            known['sha'][sha] = path
+            if sha not in known['sha']:
+                known['sha'][sha] = path
             if file['sha512'] == sha:
                 return path
 
@@ -180,11 +188,14 @@ def adjust_to_import(gc, opts, assetstore, known, file):
     if not file['size']:
         return
     file = gc.get(f'resource/{file["_id"]}', parameters={'type': 'file'})
+    if file.get('path') and file.get('sha512'):
+        known['path'][file['path']] = file['sha512']
     if not file.get('imported') and file['size'] >= opts.size:
         path = match_sha(file, known, opts)
         if not path:
             return
         if opts.verbose >= 1:
+            clear_line()
             print('Move %s (%s) to %s' % (file['name'], file['_id'], path))
         gc.post(f'file/{file["_id"]}/import/adjust_path', parameters={'path': path})
     elif file.get('imported') and 'path' in file and file.get('size'):
@@ -194,7 +205,8 @@ def adjust_to_import(gc, opts, assetstore, known, file):
         if not path or file['path'] == path:
             return
         if opts.verbose >= 1:
-            print('Move %s (%s) to %s' % (file['name'], file['_id'], path))
+            clear_line()
+            print('Move %s (%s) from %s to %s' % (file['name'], file['_id'], file['path'], path))
         gc.post(f'file/{file["_id"]}/import/adjust_path', parameters={'path': path})
 
 
@@ -204,6 +216,8 @@ def adjust_current_import(gc, opts, assetstore, known, file):
     if not file['size']:
         return
     file = gc.get(f'resource/{file["_id"]}', parameters={'type': 'file'})
+    if file.get('path') and file.get('sha512'):
+        known['path'][file['path']] = file['sha512']
     if file.get('imported'):
         try:
             next(gc.downloadFileAsIterator(file['_id']))
@@ -214,9 +228,11 @@ def adjust_current_import(gc, opts, assetstore, known, file):
         if not path:
             path = gc.get(f'resource/{file["_id"]}/path', parameters={'type': 'file'})
             if opts.verbose >= 1:
+                clear_line()
                 print(f'--> File is missing: {path}')
             return
         if opts.verbose >= 1:
+            clear_line()
             print('Adjust %s (%s) to %s' % (file['name'], file['_id'], path))
         gc.post(f'file/{file["_id"]}/import/adjust_path', parameters={'path': path})
 
@@ -239,14 +255,18 @@ def get_girder_client(opts):
 
 
 def check_assetstore(gc, opts):
+    if opts.verbose >= 2:
+        clear_line()
+        print('Checking assetstore')
     basepath = os.path.realpath(os.path.expanduser(opts.assetstore))
     start = time.time()
     last = start
     checked = 0
     removed = 0
-    for line in subprocess.Popen(['find', basepath, '-type', 'f'],
-                                 stdout=subprocess.PIPE).stdout:
-        path = line.decode().rstrip()
+    lines = subprocess.Popen(['find', basepath, '-type', 'f', '-print0'],
+                             stdout=subprocess.PIPE).stdout.read().split(b'\0')
+    for line in tqdm(lines):
+        path = line.decode()
         if not path.startswith(basepath):
             continue
         subpath = path[len(basepath):].lstrip(os.path.sep)
@@ -259,6 +279,7 @@ def check_assetstore(gc, opts):
         except ValueError:
             continue
         if time.time() - last > 10 and opts.verbose >= 2:
+            clear_line()
             print('  %3.5fs - %d files checked, %d removed' % (
                 time.time() - start, checked, removed))
             last = time.time()
@@ -271,8 +292,10 @@ def check_assetstore(gc, opts):
         os.unlink(os.path.join(basepath, subpath))
         removed += 1
         if opts.verbose >= 1:
+            clear_line()
             print('Removed abandoned file %s' % subpath)
     if opts.verbose >= 2:
+        clear_line()
         print('  %3.5fs - %d files checked, %d removed' % (
             time.time() - start, checked, removed))
 
@@ -347,64 +370,84 @@ if __name__ == '__main__':  # noqa
     if opts.verbose >= 2:
         print('Parsed arguments: %r' % opts)
     gc = get_girder_client(vars(opts))
-    lastlog = time.time()
     count = 0
     hashcount = 0
     if opts.hash:
-        for file in walk_files(gc, opts, query={'sha512': {'$exists': False}}):
+        if opts.verbose >= 2:
+            clear_line()
+            print('Hashing files')
+        files = sorted(
+            walk_files(gc, opts, query={
+                'sha512': {'$exists': False}, 'linkUrl': {'$exists': False}}),
+            key=lambda f: (f['name'], f['_id']))
+        for file in tqdm(files):
             hashcount += generate_hash(gc, opts, file)
             count += 1
-            if time.time() - lastlog > 10 and opts.verbose >= 2:
-                print('Hashed %d/%d files' % (hashcount, count))
-                lastlog = time.time()
         if opts.verbose >= 2:
+            clear_line()
             print('Hashed %d/%d files' % (hashcount, count))
     known_files = {'len': {}, 'sha': {}, 'path': {}}
     if opts.direct or opts.valid or opts.earlier:
-        for mount in opts.mount:
-            if opts.verbose >= 2:
-                print('Scanning %s' % mount)
-            scan_mount(mount, known_files, opts)
-        for mount in opts.exclude:
-            if opts.verbose >= 2:
-                print('Scanning %s for exclusion' % mount)
-            scan_mount(mount, known_files, opts, True)
+        if opts.mount:
+            for mount in opts.mount:
+                if opts.verbose >= 2:
+                    clear_line()
+                    print('Scanning %s' % mount)
+                scan_mount(mount, known_files, opts)
+        if opts.exclude:
+            for mount in opts.exclude:
+                if opts.verbose >= 2:
+                    clear_line()
+                    print('Scanning %s for exclusion' % mount)
+                scan_mount(mount, known_files, opts, True)
     assetstore = get_fsassetstore(gc)
     if opts.direct:
+        if opts.verbose >= 2:
+            clear_line()
+            print('Checking direct files')
         count = 0
-        for file in walk_files(gc, opts, query={
+        files = sorted(
+            walk_files(gc, opts, query={
                 'sha512': {'$exists': True}, 'imported': {'$exists': False},
-                'size': {'$exists': True, '$gte': opts.size}}):
+                'size': {'$exists': True, '$gte': opts.size}}),
+            key=lambda f: (f['name'], f['_id']))
+        for file in tqdm(files):
             adjust_to_import(gc, opts, assetstore, known_files, file)
             count += 1
-            if time.time() - lastlog > 10 and opts.verbose >= 2:
-                print('Checked direct %d/%d files' % (len(known_files['path']), count))
-                lastlog = time.time()
         if opts.verbose >= 2:
+            clear_line()
             print('Checked direct %d/%d files' % (len(known_files['path']), count))
     if opts.earlier:
+        if opts.verbose >= 2:
+            clear_line()
+            print('Checking earlier files')
         count = 0
-        for file in walk_files(gc, opts, query={
+        files = sorted(
+            walk_files(gc, opts, query={
                 'sha512': {'$exists': True}, 'imported': {'$exists': True},
-                'size': {'$exists': True}, 'path': {'$exists': True}}):
+                'size': {'$exists': True}, 'path': {'$exists': True}}),
+            key=lambda f: (f['name'], f['_id']))
+        for file in tqdm(files):
             adjust_to_import(gc, opts, assetstore, known_files, file)
             count += 1
-            if time.time() - lastlog > 10 and opts.verbose >= 2:
-                print('Checked earlier %d/%d files' % (len(known_files['path']), count))
-                lastlog = time.time()
         if opts.verbose >= 2:
+            clear_line()
             print('Checked earlier %d/%d files' % (len(known_files['path']), count))
     if opts.valid:
+        if opts.verbose >= 2:
+            clear_line()
+            print('Checking import files')
         count = 0
-        for file in walk_files(gc, opts, query={
+        files = sorted(
+            walk_files(gc, opts, query={
                 'sha512': {'$exists': True}, 'imported': True,
-                'size': {'$exists': True}}):
+                'size': {'$exists': True}}),
+            key=lambda f: (f['name'], f['_id']))
+        for file in tqdm(files):
             adjust_current_import(gc, opts, assetstore, known_files, file)
             count += 1
-            if time.time() - lastlog > 10 and opts.verbose >= 2:
-                print('Checked import %d/%d files' % (len(known_files['path']), count))
-                lastlog = time.time()
         if opts.verbose >= 2:
+            clear_line()
             print('Checked import %d/%d files' % (len(known_files['path']), count))
     if opts.assetstore:
         check_assetstore(gc, opts)
