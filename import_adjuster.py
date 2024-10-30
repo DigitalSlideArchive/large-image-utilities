@@ -400,6 +400,7 @@ if __name__ == '__main__':  # noqa
                     clear_line()
                     print('Scanning %s for exclusion' % mount)
                 scan_mount(mount, known_files, opts, True)
+    fsassetstores = [a for a in gc.listResource('assetstore') if a['type'] == 0]
     assetstore = get_fsassetstore(gc)
     if opts.direct:
         if opts.verbose >= 2:
@@ -409,8 +410,9 @@ if __name__ == '__main__':  # noqa
         files = sorted(
             walk_files(gc, opts, query={
                 'sha512': {'$exists': True}, 'imported': {'$exists': False},
-                'size': {'$exists': True, '$gte': opts.size}}),
-            key=lambda f: (f['name'], f['_id']))
+                'size': {'$exists': True, '$gte': opts.size},
+                'assetstoreId': {'$in': [{'$oid': a['_id']} for a in fsassetstores]},
+            }), key=lambda f: (f['name'], f['_id']))
         for file in tqdm(files):
             adjust_to_import(gc, opts, assetstore, known_files, file)
             count += 1
@@ -425,8 +427,9 @@ if __name__ == '__main__':  # noqa
         files = sorted(
             walk_files(gc, opts, query={
                 'sha512': {'$exists': True}, 'imported': {'$exists': True},
-                'size': {'$exists': True}, 'path': {'$exists': True}}),
-            key=lambda f: (f['name'], f['_id']))
+                'size': {'$exists': True}, 'path': {'$exists': True},
+                'assetstoreId': {'$in': [{'$oid': a['_id']} for a in fsassetstores]},
+            }), key=lambda f: (f['name'], f['_id']))
         for file in tqdm(files):
             adjust_to_import(gc, opts, assetstore, known_files, file)
             count += 1
