@@ -2,7 +2,9 @@
 
 import argparse
 import ast
+import json
 import math
+import pickle
 import re
 import tempfile
 
@@ -45,6 +47,9 @@ def adjust_ifds(ifds, tmpfile, lenlist, compression):  # noqa
             if tifftools.Tag.SampleFormat.value in ifd['tags']:
                 anySamplesFloat = anySamplesFloat or (
                     ifd['tags'][tifftools.Tag.SampleFormat.value]['data'][0] not in {1, 2})
+            elif (tifftools.Tag.Software.value in ifd['tags'] and
+                    'IndicaLabs' in ifd['tags'][tifftools.Tag.Software.value]['data']):
+                anySamplesFloat = True
             if tifftools.Tag.Compression.value not in ifd['tags']:
                 ifd['tags'][tifftools.Tag.Compression.value] = {
                     'datatype': tifftools.Datatype.SHORT,
@@ -212,11 +217,11 @@ def generate_imagej_if_needed(info, destName, compression):
             pass
 
 
-def main(sourceName, destName, compression):  # noqa
-    currentName = None
+def parse_ttdump(sourceName, destName, compression):  # noqa
     info = {}
-    lastascii = None
     isgeo = False
+    currentName = None
+    lastascii = None
     for line in open(sourceName).readlines():
         line = line.rstrip()
         if line.startswith('-- ') and line.endswith(' --'):
@@ -316,7 +321,8 @@ def main(sourceName, destName, compression):  # noqa
             if taginfo['datatype'] == tifftools.Datatype.DOUBLE:
                 ttype = tifftools.Tag.GeoDoubleParamsTag.value
                 val = [float(v) for v in geotag.groups()[1].split()]
-                if len(val) == 1 and int(val[0]) == val[0] and val[0] >= -32768 and val[0] <= 32767:
+                if (len(val) == 1 and int(val[0]) == val[0] and
+                        val[0] >= -32768 and val[0] <= 32767):
                     ttype, count, offset = 0, 1, int(val[0])
                 else:
                     count = len(val)
@@ -350,6 +356,18 @@ def main(sourceName, destName, compression):  # noqa
                     'datatype': tifftools.Datatype.ASCII,
                     'data': ifd['geotag'][2]
                 }
+    return info, currentName
+
+
+def main(sourceName, destName, compression):
+    currentName = None
+    try:
+        info = json.load(open(sourceName, 'r'))
+    except Exception:
+        try:
+            info = pickle.load(open(sourceName, 'rb'))
+        except Exception:
+            info, currentName = parse_ttdump(sourceName, destName, compression)
     if len(info):
         write(info, currentName, destName, compression)
         generate_imagej_if_needed(info, destName, compression)
