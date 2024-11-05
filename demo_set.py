@@ -628,7 +628,10 @@ def create_demo_set(gc, resource_path, target_path, dest_path, max_items=0,
                         record['parent'] = os.path.sep.join(
                             [dest] + record['parent'].split(os.path.sep)[1:])
         if not manifest['description']:
-            manifest['description'] = f'{len(manifest["items"])} items'
+            if 'item' in manifest:
+                manifest['description'] = f'{len(manifest["item"])} items'
+            else:
+                manifest['description'] = ''
         zf.writestr('manifest.yaml', yaml.dump(
             manifest, Dumper=IndentDumper, default_flow_style=False, sort_keys=False))
 
