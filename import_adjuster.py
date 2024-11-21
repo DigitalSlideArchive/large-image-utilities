@@ -447,7 +447,10 @@ if __name__ == '__main__':  # noqa
                 'size': {'$exists': True}}),
             key=lambda f: (f['name'], f['_id']))
         for file in tqdm(files):
-            adjust_current_import(gc, opts, assetstore, known_files, file)
+            try:
+                adjust_current_import(gc, opts, assetstore, known_files, file)
+            except Exception as exc:
+                print(f'Failed: {exc}')
             count += 1
         if opts.verbose >= 2:
             clear_line()
