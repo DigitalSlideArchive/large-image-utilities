@@ -374,7 +374,11 @@ def main(sourceName, destName, compression):
 
 
 def command():
-    parser = argparse.ArgumentParser(description='Convert a tifftools dump output to a tiff file.')
+    parser = argparse.ArgumentParser(
+        description='Convert a tifftools dump output to a tiff file.  For '
+        'minimal size, run "tifftools -y <path> --dedup" after this program.  '
+        'For a genuine COG, run "gdalwarp -of COG -CO COMPRESS=LZW -CO '
+        'BLOCKSIZE=1024 <src path> <desc path>"')
     parser.add_argument('source', type=str, help='Source tifftools dump filename')
     parser.add_argument('out', type=str, help='Output image filename')
     parser.add_argument(
