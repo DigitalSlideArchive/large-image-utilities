@@ -22,21 +22,24 @@ def augment_lab(pal, n, white=True):
         best = None, None, None, None
         for lum in ((255, 192) if white else (0, 63)):
             steps = 1000
-            for step in range(steps):
-                ang = math.pi * 2 * step / steps
-                a = round(127.5 + 60 * math.cos(ang))
-                b = round(127.5 + 60 * math.sin(ang))
-                rgb = lab_to_palette(np.array([[lum, a, b]]))
-                ll, aa, bb = palette_to_lab(rgb).tolist()[0]
-                sdist = None
-                for idx in range(lab.shape[0]):
-                    dist = ((float(lab[idx][0]) - ll) ** 2 +
-                            (float(lab[idx][1]) - aa) ** 2 +
-                            (float(lab[idx][2]) - bb) ** 2)
-                    if sdist is None or dist < sdist:
-                        sdist = dist
-                if sdist is None or best[0] is None or sdist > best[0]:
-                    best = sdist, rgb
+            for abdist in [40, 60, 80]:
+                for step in range(steps):
+                    ang = math.pi * 2 * step / steps
+                    a = round(127.5 + abdist * math.cos(ang))
+                    b = round(127.5 + abdist * math.sin(ang))
+                    rgb = lab_to_palette(np.array([[lum, a, b]]))
+                    ll, aa, bb = palette_to_lab(rgb).tolist()[0]
+                    sdist = None
+                    for idx in range(lab.shape[0]):
+                        dist = (((float(lab[idx][0]) - ll) * 100 / 255) ** 2 +
+                                (float(lab[idx][1]) - aa) ** 2 +
+                                (float(lab[idx][2]) - bb) ** 2)
+                        if sdist is None or dist < sdist:
+                            sdist = dist
+                    if sdist is None or best[0] is None or sdist > best[0]:
+                        best = sdist, rgb
+                    if best[0] is None:
+                        break
                 if best[0] is None:
                     break
             if best[0] is None:
