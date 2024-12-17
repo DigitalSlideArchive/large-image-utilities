@@ -7,10 +7,7 @@ import sys
 import large_image
 import numpy as np
 import PIL.Image
-import PIL.ImageCms
-
-labtorgb = None
-rgbtolab = None
+import skimage.color
 
 
 def augment_lab(pal, n, white=True):
@@ -18,20 +15,20 @@ def augment_lab(pal, n, white=True):
         if pal.shape[0]:
             lab = palette_to_lab(pal)
         else:
-            lab = np.zeros((0, 3), dtype=np.uint8)
+            lab = np.zeros((0, 3), dtype=float)
         best = None, None, None, None
-        for lum in ((255, 192) if white else (0, 63)):
-            steps = 1000
+        for lum in ((100, 75) if white else (0, 25)):
+            steps = 360
             for abdist in [40, 60, 80]:
                 for step in range(steps):
                     ang = math.pi * 2 * step / steps
-                    a = round(127.5 + abdist * math.cos(ang))
-                    b = round(127.5 + abdist * math.sin(ang))
+                    a = abdist * math.cos(ang)
+                    b = abdist * math.sin(ang)
                     rgb = lab_to_palette(np.array([[lum, a, b]]))
                     ll, aa, bb = palette_to_lab(rgb).tolist()[0]
                     sdist = None
                     for idx in range(lab.shape[0]):
-                        dist = (((float(lab[idx][0]) - ll) * 100 / 255) ** 2 +
+                        dist = ((float(lab[idx][0]) - ll) ** 2 +
                                 (float(lab[idx][1]) - aa) ** 2 +
                                 (float(lab[idx][2]) - bb) ** 2)
                         if sdist is None or dist < sdist:
@@ -61,7 +58,10 @@ def augment_hsv(pal, n, white=True):
                     rgb = hsv_to_palette(np.array([[hue, sat, lum]]))
                     sdist = None
                     for idx in range(hsv.shape[0]):
-                        dist = ((float(hsv[idx][0]) - hue) ** 2 +
+                        huediff = abs(float(hsv[idx][0]) - hue)
+                        if huediff >= 128:
+                            huediff -= 256
+                        dist = (huediff ** 2 +
                                 (float(hsv[idx][1]) - sat) ** 2 +
                                 (float(hsv[idx][2]) - lum) ** 2)
                         if sdist is None or dist < sdist:
@@ -113,27 +113,14 @@ def sort_by_hue(pal):
 
 
 def palette_to_lab(pal):
-    global rgbtolab
-
-    image = PIL.Image.fromarray(pal[None, ...].astype(np.uint8), 'RGBA')
-    if not rgbtolab:
-        srgb = PIL.ImageCms.createProfile('sRGB')
-        lab = PIL.ImageCms.createProfile('LAB')
-        rgbtolab = PIL.ImageCms.buildTransformFromOpenProfiles(srgb, lab, 'RGB', 'LAB')
-    labimg = PIL.ImageCms.applyTransform(image.convert('RGB'), rgbtolab)
-    return np.asarray(labimg)[0, :, :]
+    return skimage.color.rgb2lab(pal[:, :3].astype(float) / 255)
 
 
 def lab_to_palette(labarr):
-    global labtorgb
-
-    image = PIL.Image.fromarray(labarr[None, ...].astype(np.uint8), 'LAB')
-    if not labtorgb:
-        srgb = PIL.ImageCms.createProfile('sRGB')
-        lab = PIL.ImageCms.createProfile('LAB')
-        labtorgb = PIL.ImageCms.buildTransformFromOpenProfiles(lab, srgb, 'LAB', 'RGB')
-    rgbimg = PIL.ImageCms.applyTransform(image, labtorgb).convert('RGBA')
-    return np.asarray(rgbimg)[0, :, :]
+    rgb = (skimage.color.lab2rgb(labarr.astype(float)) * 255 + 0.5).astype(np.uint8)
+    rgba = np.pad(rgb, ((0, 0), (0, 1)), constant_values=255)
+    # print(labarr, skimage.color.lab2rgb(labarr.astype(float)), rgba)
+    return rgba
 
 
 def sort_by_lab(pal):
