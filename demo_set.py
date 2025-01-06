@@ -485,42 +485,78 @@ def create_add_annotations(gc, zf, manifest, base_path):
             if not len(annotList):
                 continue
             for aidx, annot in enumerate(annotList):
-                zfpath = os.path.join(item['localpath'], f'_annotation_{aidx}.json')
                 logger.info(f'Getting annotation {aidx}/{len(annotList)} for {item["name"]}')
-                hasGirder = False
-                with open(temppath, 'wb') as f:
-                    record = gc.get(f'annotation/{annot["_id"]}')
-                    record = record.get('annotation', record)
-                    logger.debug(f'Adding annotation {record["name"]}')
-                    f.write(json.dumps(record, separators=(',', ':')).encode())
-                    for el in record.get('elements', [])[:10]:
-                        hasGirder = bool(hasGirder or el.get('girderId'))
-                        if (el.get('girderId') and el['girderId'] not in
-                                {i['originalId'] for i in manifest['item']}):
-                            folderName = '_annotations'
-                            folderParent = parent_path.split('/')[0]
-                            folder = [f for f in manifest['folder']
-                                      if f['parent'] == folderParent and
-                                      f['name'] == folderName]
-                            if not len(folder):
-                                manifest['folder'].append({
-                                    'model': 'folder',
-                                    'parent': folderParent,
-                                    'name': folderName,
-                                })
-                                folder = manifest['folder'][-1]
-                            else:
-                                folder = folder[0]
-                            annItem = gc.getItem(record['elements'][0]['girderId'])
-                            create_add_item(gc, zf, manifest, folder, annItem, base_path)
-                    manifest['annotation'].append({
-                        'name': record['name'],
-                        'parent': os.path.join(item['parent'], item['name']),
-                        'localpath': zfpath,
+                create_add_annotation(gc, zf, manifest, base_path, temppath,
+                                      parent_path, item, aidx, annot)
+
+
+def create_add_annotation(gc, zf, manifest, base_path, temppath, parent_path,
+                          item, aidx, annot):
+    """
+    Add one annotation for one item in a demo set.  This may add additional
+    items (their annotations are not added) and possibly an additional folder
+    to store them.
+
+    :param gc: authenticated girder client.
+    :param zf: open zipfile.
+    :param manifest: the manifest record to modify.
+    :param base_path: the girder resource path to use as the context of
+        relative paths.
+    :param temp_path: A location to store annotations temporarily.
+    :param parent_path: the item path.
+    :param item: the item with the annotaton to add.
+    :param aidx: a zero-based index of the annotation in the current item.
+    :param annot: the annotation to add.
+    """
+    zfpath = os.path.join(item['localpath'], f'_annotation_{aidx}.json')
+    hasGirder = False
+    with open(temppath, 'wb') as f:
+        record = gc.get(f'annotation/{annot["_id"]}')
+        record = record.get('annotation', record)
+        logger.debug(f'Adding annotation {record["name"]}')
+        f.write(json.dumps(record, separators=(',', ':')).encode())
+        for el in record.get('elements', [])[:10]:
+            hasGirder = bool(hasGirder or el.get('girderId'))
+            if (el.get('girderId') and el['girderId'] not in
+                    {i['originalId'] for i in manifest['item']}):
+                folderName = '_annotations'
+                folderParent = parent_path.split('/')[0]
+                folder = [f for f in manifest['folder']
+                          if f['parent'] == folderParent and
+                          f['name'] == folderName]
+                if not len(folder):
+                    manifest['folder'].append({
+                        'model': 'folder',
+                        'parent': folderParent,
+                        'name': folderName,
                     })
-                if hasGirder:
-                    manifest['annotation'][-1]['hasGirderReference'] = True
-                zf.write(temppath, zfpath)
+                    folder = manifest['folder'][-1]
+                else:
+                    folder = folder[0]
+                try:
+                    annItem = gc.getItem(el.get('girderId'))
+                    create_add_item(gc, zf, manifest, folder, annItem, base_path)
+                except Exception:
+                    # If we can't access the girder item, we really don't have
+                    # permission for this annotation, so we should skip it.
+                    # Marking it failed means that we won't add the annotation.
+                    # It is possible we will add other referenced items before
+                    # this failure.
+                    logger.info(
+                        'Cannot fetch items associated with annotation.  This '
+                        'annotation will be skipped.')
+                    hasGirder = 'fail'
+                    break
+        if hasGirder != 'fail':
+            manifest['annotation'].append({
+                'name': record['name'],
+                'parent': os.path.join(item['parent'], item['name']),
+                'localpath': zfpath,
+            })
+    if hasGirder != 'fail':
+        if hasGirder:
+            manifest['annotation'][-1]['hasGirderReference'] = True
+        zf.write(temppath, zfpath)
 
 
 def create_add_folder(gc, zf, manifest, folder, max_items, base_path, filter):
