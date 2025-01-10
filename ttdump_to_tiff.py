@@ -112,11 +112,12 @@ def set_mcu_starts(path, mcutag, offset, length):
         previous = b'\xff' + parts[-1]
         pos += len(parts[0])
         for part in parts[1:-1]:
-            if not len(mcu):
-                if part[0] == 0xda:
-                    mcu.append(pos + 2 + part[1] * 256 + part[2])
-            elif part[0] >= 0xd0 and part[0] <= 0xd7:
-                mcu.append(pos + 2)
+            if len(part):
+                if not len(mcu):
+                    if part[0] == 0xda:
+                        mcu.append(pos + 2 + part[1] * 256 + part[2])
+                elif part[0] >= 0xd0 and part[0] <= 0xd7:
+                    mcu.append(pos + 2)
             pos += 1 + len(part)
     mcutag['data'] = mcu
 
@@ -130,31 +131,43 @@ def convert_to_ndpi(destName):
 
     with tempfile.TemporaryDirectory() as tempdir:
         info = tifftools.read_tiff(destName)
+        info['ndpi'] = True
         for idx, ifd in enumerate(info['ifds']):
+            ifdw = ifd['tags'][tifftools.Tag.ImageWidth.value]['data'][0]
+            ifdh = ifd['tags'][tifftools.Tag.ImageLength.value]['data'][0]
+            ifdsamp = ifd['tags'][tifftools.Tag.SamplesPerPixel.value]['data'][0]
+            jpegPath = os.path.join(tempdir, '_wsi_%d.jpeg' % idx)
+            jpegPos = os.path.getsize(destName)
+            img = pyvips.Image.tiffload(destName, page=idx)
+            img.jpegsave(jpegPath, Q=91, subsample_mode=pyvips.ForeignSubsample.OFF)
             if tifftools.Tag.NDPI_MCU_STARTS.value in ifd['tags']:
-                ifdw = ifd['tags'][tifftools.Tag.ImageWidth.value]['data'][0]
-                ifdh = ifd['tags'][tifftools.Tag.ImageLength.value]['data'][0]
-                jpegPath = os.path.join(tempdir, '_wsi_%d.jpeg' % idx)
-                jpegPos = os.path.getsize(destName)
-                img = pyvips.Image.tiffload(destName, page=idx)
-                img.jpegsave(jpegPath, Q=95, subsample_mode=pyvips.ForeignSubsample.OFF)
                 restartInterval = (
                     int(math.ceil(ifdw / 8) * math.ceil(ifdh / 8)) //
                     len(ifd['tags'][tifftools.Tag.NDPI_MCU_STARTS.value]['data']))
-                subprocess.check_call(
-                    ['jpegtran', '-restart', '%dB' % restartInterval, jpegPath],
-                    stdout=open(destName, 'ab'))
-                jpegLen = os.path.getsize(destName) - jpegPos
-                ifd['tags'][tifftools.Tag.Compression.value]['data'][0] = \
-                    tifftools.constants.Compression.JPEG.value
-                ifd['tags'][tifftools.Tag.Photometric.value]['data'][0] = \
-                    tifftools.constants.Photometric.YCbCr.value
-                ifd['tags'][tifftools.Tag.StripOffsets.value]['data'] = [jpegPos]
-                ifd['tags'][tifftools.Tag.StripByteCounts.value]['data'] = [jpegLen]
+            else:
+                restartInterval = 1024
+            subprocess.check_call(
+                ['jpegtran', '-restart', '%dB' % restartInterval, jpegPath],
+                stdout=open(destName, 'ab'))
+            jpegLen = os.path.getsize(destName) - jpegPos
+            ifd['tags'][tifftools.Tag.Compression.value]['data'][0] = \
+                tifftools.constants.Compression.JPEG.value
+            # The 1-bit per image is labelled as RGB
+            ifd['tags'][tifftools.Tag.Photometric.value]['data'][0] = (
+                tifftools.constants.Photometric.YCbCr.value if ifdsamp == 3 else
+                # tifftools.constants.Photometric.MinIsBlack.value)
+                tifftools.constants.Photometric.RGB.value)
+            ifd['tags'][tifftools.Tag.StripOffsets.value]['data'] = [jpegPos]
+            ifd['tags'][tifftools.Tag.StripByteCounts.value]['data'] = [jpegLen]
+            if tifftools.Tag.NDPI_MCU_STARTS.value in ifd['tags']:
                 set_mcu_starts(
                     destName, ifd['tags'][tifftools.Tag.NDPI_MCU_STARTS.value],
                     ifd['tags'][tifftools.Tag.StripOffsets.value]['data'][0],
                     sum(ifd['tags'][tifftools.Tag.StripByteCounts.value]['data']))
+            if tifftools.Tag.NDPI_PROPERTY_MAP.value in ifd['tags']:
+                ifd['tags'][tifftools.Tag.NDPI_PROPERTY_MAP.value]['data'] = \
+                    ifd['tags'][tifftools.Tag.NDPI_PROPERTY_MAP.value]['data'].strip().replace(
+                        '\n', '\r\n') + '\r\n'
         info['size'] = os.path.getsize(destName)
         for ifd in info['ifds']:
             ifd['size'] = info['size']
