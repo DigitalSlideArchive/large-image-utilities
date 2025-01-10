@@ -147,7 +147,7 @@ def convert_to_ndpi(destName):
             else:
                 restartInterval = 1024
             subprocess.check_call(
-                ['jpegtran', '-restart', '%dB' % restartInterval, jpegPath],
+                ['jpegtran', '-optimize', '-restart', '%dB' % restartInterval, jpegPath],
                 stdout=open(destName, 'ab'))
             jpegLen = os.path.getsize(destName) - jpegPos
             ifd['tags'][tifftools.Tag.Compression.value]['data'][0] = \
