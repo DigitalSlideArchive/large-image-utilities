@@ -11,6 +11,8 @@
 # image).
 # JPEG compression duplicates the jpeg headers, greatly increasing the output
 # file size over what is expected.
+# A JPZEG-2000 compression that seems reasonable is
+#  docker run --rm -it -v /mnt/data2:/data kitware/bioometiff /data/NCISEER/Mouse/SEER_Mouse_1_17158538.svs --rgb --quality=0.95 --compression='JPEG-2000 Lossy' /data/SEER_Mouse_1_17158538.ome.tiff --max_workers=`nproc`
 
 FROM python:3.12-slim
 
