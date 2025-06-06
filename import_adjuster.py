@@ -25,7 +25,13 @@ def clear_line():
 def generate_hash(gc, opts, file):
     if file.get('sha512') or file.get('linkUrl'):
         return 0
-    path = gc.get(f'resource/{file["_id"]}/path', parameters={'type': 'file'})
+    try:
+        path = gc.get(f'resource/{file["_id"]}/path', parameters={'type': 'file'})
+    except Exception:
+        if opts.verbose >= 1:
+            clear_line()
+            print(f'--> Cannot get path for hash of {path} ({file})')
+        return 0
     if opts.verbose >= 2:
         clear_line()
         print(f'Getting hash for {path}')
