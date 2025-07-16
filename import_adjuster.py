@@ -173,13 +173,19 @@ def match_sha(file, known, opts):
             if opts.verbose >= 3:
                 clear_line()
                 print('    Getting sha for %s' % path)
+            elif opts.verbose >= 2:
+                sys.stdout.write('\r    Getting sha for %s\r' % path[-58:])
+                sys.stdout.flush()
             sha = hashlib.sha512()
-            with open(path, 'rb') as f:
-                while True:
-                    data = f.read(65536)
-                    if not data:
-                        break
-                    sha.update(data)
+            try:
+                with open(path, 'rb') as f:
+                    while True:
+                        data = f.read(65536)
+                        if not data:
+                            break
+                        sha.update(data)
+            except Exception:
+                return
             sha = sha.hexdigest()
             known['path'][path] = sha
             if sha not in known['sha']:
