@@ -101,8 +101,8 @@ def command():  # noqa
                     diff = diff or len(parts1) != len(parts2)
                     for idx in range(min(len(parts1), len(parts2))):
                         if parts1[idx] != parts2[idx]:
-                            if (not re.match(r'\d*\.\d+s', parts1[idx]) or
-                                    not re.match(r'\d*\.\d+s', parts2[idx])):
+                            if (not re.match(r'(\d*\.|)\d+s', parts1[idx]) or
+                                    not re.match(r'(\d*\.|)\d+s', parts2[idx])):
                                 diff = True
                             else:
                                 time1 = float(parts1[idx][:-1])

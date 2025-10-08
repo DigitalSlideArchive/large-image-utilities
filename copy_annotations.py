@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
 import argparse
+import filecmp
 import json
 import os
 import random
+import shutil
 import tempfile
 
 import girder_client.cli
@@ -58,6 +60,7 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
                         dfile = gcd.uploadFileToItem(
                             ditem['_id'], temppath, mimeType=file['mimeType'],
                             filename=file['name'])
+                        switch_to_import(gcd, ditem, dfile, temppath, opts)
                 if hasli and file['_id'] == sitem['largeImage'].get('fileId'):
                     setli = dfile
         if setli:
@@ -75,6 +78,33 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
             print('FAILED to copy annotations; disabling annotation copy')
             print(e)
             opts.no_annot = True
+
+
+def switch_to_import(gc, item, file, temppath, opts):
+    if not opts.dest_import or not opts.local_path or not opts.import_base:
+        return
+    gpath = gc.get(f'resource/{item["_id"]}/path', parameters={'type': 'item'})
+    base = opts.import_base.rstrip('/') + '/'
+    if not gpath.startswith(base):
+        return
+    fragment = gpath[len(base):]
+    localdir = os.path.dirname(os.path.join(opts.local_path, fragment))
+    if os.path.exists(localdir) and not os.path.isdir(localdir):
+        return
+    if not os.path.exists(localdir):
+        try:
+            os.makedirs(localdir, exist_ok=True)
+        except Exception:
+            return
+    localpath = os.path.join(localdir, file['name'])
+    if os.path.exists(localpath):
+        if not os.path.isfile(localpath):
+            return
+        if not filecmp.cmp(localpath, temppath, shallow=False):
+            return
+    else:
+        shutil.copy(temppath, localpath)
+    gc.post(f'file/{file["_id"]}/import/adjust_path', parameters={'path': localpath})
 
 
 def copy_annotations(opts, gcs, gcd, sitem, ditem):
@@ -190,5 +220,17 @@ if __name__ == '__main__':
         '--dest-path', help='Destination resource path.  If the last '
         'component of this is ".", it is taken from the last component of '
         'the source resource path.')
+    parser.add_argument(
+        '--dest-import', help='Prefix of the import path for individual '
+        'files.  To use imports rather than uploads, this, local-path, and '
+        'import-base must be specified.')
+    parser.add_argument(
+        '--local-path', help='Prefix of the local path for importing '
+        'individual files.  Files will be copied to this directory tree '
+        'rather than uploaded.')
+    parser.add_argument(
+        '--import-base', help='Prefix of the dest-path that is stripped off '
+        'before paths are added to the local path when importing instead of '
+        'uploading.')
     opts = parser.parse_args()
     copy_data(opts)
