@@ -8,7 +8,11 @@ import random
 import shutil
 import tempfile
 
-import girder_client.cli
+try:
+    import girder_client.cli
+except ImportError:
+    # this allows help to work even without proper installation
+    girder_client = None
 
 
 def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
@@ -49,6 +53,10 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
                     if pfile['name'] == file['name'] and pfile['size'] == file['size']:
                         dfile = pfile
                         break
+                if dfile is None:
+                    dfile = direct_import(gcs, gcd, file, ditem, opts)
+                    if dfile is not None:
+                        print('file - import', file['name'], file.get('size'))
                 if dfile is None:
                     print('file', file['name'], file.get('size'))
                     if file.get('size') is None:
@@ -105,6 +113,35 @@ def switch_to_import(gc, item, file, temppath, opts):
     else:
         shutil.copy(temppath, localpath)
     gc.post(f'file/{file["_id"]}/import/adjust_path', parameters={'path': localpath})
+
+
+def direct_import(gcs, gcd, file, ditem, opts):
+    if not opts.import_assetstore:
+        return None
+    if isinstance(opts.import_assetstore, str):
+        assetstores = [a for a in gcd.get('assetstore') if a['name'] == opts.import_assetstore]
+        if len(assetstores) == 1:
+            opts.import_assetstore = assetstores[0]
+        else:
+            opts.import_assetstore = None
+            return None
+    assetstore = opts.import_assetstore
+    try:
+        existing = gcs.get(f'resource/{file["_id"]}', parameters={'type': 'file'})
+    except Exception:
+        return None
+    if not existing.get('imported') or 'path' not in existing:
+        return None
+    try:
+        newfile = gcd.post(f'assetstore/{assetstore["_id"]}/import/single_path', parameters={
+            'path': existing['path'],
+            'itemId': ditem['_id'],
+            'name': file['name'],
+            'mimeType': file.get('mimeType'),
+        })
+    except Exception:
+        return None
+    return newfile
 
 
 def copy_annotations(opts, gcs, gcd, sitem, ditem):
@@ -179,12 +216,15 @@ def copy_resource(gcs, gcd, src_path, dest_path, opts):  # noqa
             dtop = gcd.createFolder(
                 dparent['_id'], os.path.basename(dest_path), '',
                 dparent['_modelType'], True, True)
-        except Exception:
+        except girder_client.HttpError:
             dparent = None
         if dparent is None and len(dest_parts) >= 3 and dest_parts[0] == '' and (
                 dest_parts[1] == 'collection' or dest_parts[1] == stop['_modelType']):
-            dtop = gcd.get('resource/lookup',
-                           parameters={'path': os.path.sep.join(dest_parts[:3])})
+            try:
+                dtop = gcd.get('resource/lookup',
+                               parameters={'path': os.path.sep.join(dest_parts[:3])})
+            except girder_client.HttpError:
+                dtop = None
             if not dtop:
                 if dest_parts[1] == 'user':
                     dtop = gcd.createUser(
@@ -232,5 +272,10 @@ if __name__ == '__main__':
         '--import-base', help='Prefix of the dest-path that is stripped off '
         'before paths are added to the local path when importing instead of '
         'uploading.')
+    parser.add_argument(
+        '--import-assetstore', help='Name of an assetstore to try to do '
+        'direct imports; if a file was imported on the source system and '
+        'can be imported to this assetstore on the destintation system, do '
+        'that in preference to downloading and uploading the file.')
     opts = parser.parse_args()
     copy_data(opts)
