@@ -62,15 +62,21 @@ def make_tps_yaml(args, gc):
                 if not len(points):
                     continue
                 found[item['name']] = {'item': item, 'points': points}
-                if item['name'] == args.root:
+                if item['name'] == args.root or (
+                        args.root and item['name'] == args.root.split(',')[0]):
                     first = item['_id']
             except Exception:
                 pass
     if len(found) < 2:
         print('Insufficient annotated images.')
         return
+    order = (args.root or '').split(',')
     found = [found[k[-1]] for k in sorted(
-        [(first != found[f]['item']['_id'], found[f]['item']['name'], f) for f in found])]
+        [(first != found[f]['item']['_id'],
+          order.index(found[f]['item']['name'])
+          if found[f]['item']['name'] in order else len(order),
+          found[f]['item']['name'],
+          f) for f in found])]
     sources = [{'path': found[0]['item']['name']}]
     dst = format_points(found[0]['points'])
     for entry in found[1:]:
@@ -139,7 +145,8 @@ if __name__ == '__main__':  # noqa
     parser.add_argument(
         '--root',
         help='If specified, use an image with this name as the base image.  '
-        'If not specified, the first C-sort first image is used.')
+        'If not specified, the first C-sort first image is used.  If a comma-'
+        'separated list, the images are placed in this order.')
     parser.add_argument(
         '--dest',
         help='If specified, use this as the name of the destination yaml '
