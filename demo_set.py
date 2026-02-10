@@ -117,7 +117,7 @@ def put_folders(gc, manifest, path, dryrun):
         parent = find_or_create_path(
             gc, parentpath := os.path.join(path, folder['parent']), dryrun)
         logger.info(f'Creating folder {fidx + 1}/{len(manifest["folder"])} '
-                    f'{parentpath}/{folder["name"]}')
+                    f'{parentpath.rstrip("/")}/{folder["name"]}')
         if not dryrun:
             folder['doc'] = gc.createFolder(
                 parent['_id'], folder['name'],
