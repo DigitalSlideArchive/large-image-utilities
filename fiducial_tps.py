@@ -84,7 +84,7 @@ def make_tps_yaml(args, gc):
             'path': entry['item']['name'],
             'position': {'warp': {'dst': dst, 'src': format_points(entry['points'])}}
         })
-    multi = {'sources': sources}
+    multi = {'backgroundColor': [255, 255, 255], 'sources': sources}
     with tempfile.TemporaryDirectory() as tempDir:
         dest = args.dest or (found[0]['item']['name'].rsplit('.', 1)[0] + '.yaml')
         yamlpath = os.path.join(tempDir, dest)
