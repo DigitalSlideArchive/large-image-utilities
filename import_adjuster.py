@@ -112,7 +112,10 @@ def scan_mount(base, known, opts, exclude=False):
         dirs[:] = [dirstat[1] for dirstat in dirstats]
         for filename in files:
             path = os.path.join(base, bpath, filename)
-            flen = os.stat(path).st_size
+            try:
+                flen = os.stat(path).st_size
+            except Exception:
+                continue
             lengths[path] = flen
         if time.time() - last > 10 and opts.verbose >= 2:
             print('  %3.5fs - %d distinct lengths, %d:%d files' % (
@@ -209,7 +212,10 @@ def adjust_to_import(gc, opts, assetstore, known, file):
         if opts.verbose >= 1:
             clear_line()
             print('Move %s (%s) to %s' % (file['name'], file['_id'], path))
-        gc.post(f'file/{file["_id"]}/import/adjust_path', parameters={'path': path})
+        try:
+            gc.post(f'file/{file["_id"]}/import/adjust_path', parameters={'path': path})
+        except Exception:
+            return
     elif file.get('imported') and 'path' in file and file.get('size'):
         if file['size'] in known['len'] and list(known['len'][file['size']])[0] == file['path']:
             return

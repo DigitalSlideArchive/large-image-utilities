@@ -33,10 +33,13 @@ def get_girder_client(opts):
     return girder_client.cli.GirderCli(**gcopts)
 
 
-def format_points(points):
+def format_points(points, labels=None):
     labeled = {p['label']['value']: [p['center'][0], p['center'][1]]
                for p in points if p.get('label', {}).get('value')}
     if len(labeled):
+        if labels:
+            use = set(labels.split(','))
+            labeled = {k: v for k, v in labeled.items() if k in use}
         return labeled
     unlabeled = [[p['center'][0], p['center'][1]] for p in points]
     return unlabeled
@@ -78,11 +81,11 @@ def make_tps_yaml(args, gc):
           found[f]['item']['name'],
           f) for f in found])]
     sources = [{'path': found[0]['item']['name']}]
-    dst = format_points(found[0]['points'])
+    dst = format_points(found[0]['points'], args.labels)
     for entry in found[1:]:
         sources.append({
             'path': entry['item']['name'],
-            'position': {'warp': {'dst': dst, 'src': format_points(entry['points'])}}
+            'position': {'warp': {'dst': dst, 'src': format_points(entry['points'], args.labels)}}
         })
     multi = {'backgroundColor': [255, 255, 255], 'sources': sources}
     with tempfile.TemporaryDirectory() as tempDir:
@@ -151,6 +154,10 @@ if __name__ == '__main__':  # noqa
         '--dest',
         help='If specified, use this as the name of the destination yaml '
         'image.  The default will be the chosen root with the yaml extension.')
+    parser.add_argument(
+        '--labels',
+        help='If specified, a comma-separated list of labels to include from '
+        'the annotations')
 
     args = parser.parse_args()
     if args.verbose >= 2:
