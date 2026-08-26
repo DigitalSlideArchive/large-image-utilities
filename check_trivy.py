@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -13,11 +14,15 @@ if __name__ == '__main__':
         '--exit-code 1 --severity HIGH,CRITICAL --no-progress --ignorefile '
         '/dev/null --format json`')
     parser.add_argument('ignore', help='The trivy ignore file to compare.')
+    parser.add_argument('--update', action='store_true', help='Modify the trivy file.')
     args = parser.parse_args()
     results = json.load(open(args.json))
-    current = {line.strip().split('#')[0]
-               for line in open(args.ignore).readlines()
-               if line.strip() and not line.strip().startswith('#')}
+    if os.path.exists(args.ignore):
+        current = {line.strip().split('#')[0]
+                   for line in open(args.ignore).readlines()
+                   if line.strip() and not line.strip().startswith('#')}
+    else:
+        current = set()
     newset = set()
     reasons = {}
     for res in results['Results']:
@@ -28,7 +33,7 @@ if __name__ == '__main__':
             newset.add(id)
             reasons[id] = {
                 'severity': vuln['Severity'],
-                'title': vuln['Title'],
+                'title': vuln.get('Title', id),
                 'type': res['Type'],
             }
     unneeded = current - newset
@@ -41,7 +46,20 @@ if __name__ == '__main__':
         print('These CVEs must be added:')
         for id in sorted(needed):
             print(f'  {id}')
-    print('New ignore file:')
+    new = []
     for id in sorted(newset, key=lambda a: (reasons[a]['type'], a)):
-        print(f'# {reasons[id]["severity"]}: {reasons[id]["type"]} - {reasons[id]["title"][:60]}')
-        print(f'{id}')
+        new.append(
+            f'# {reasons[id]["severity"]}: {reasons[id]["type"]} - {reasons[id]["title"]}'[:79]
+            .rstrip())
+        new.append(f'{id}')
+    print('New ignore file:')
+    print('\n'.join(new))
+    if os.path.exists(args.ignore) and args.update:
+        current = open(args.ignore).read()
+        if '\n\n' in current:
+            current = current.rsplit('\n\n', 1)[0] + '\n\n'
+        else:
+            current = ''
+        current += '\n'.join(new) + '\n'
+        with open(args.ignore, 'w') as fptr:
+            fptr.write(current)

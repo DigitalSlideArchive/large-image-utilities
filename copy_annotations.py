@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "girder-client",
+# ]
+# ///
 
 import argparse
 import filecmp
@@ -19,15 +25,22 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
     if (sparent['_modelType'] == 'folder' and dparent['_modelType'] == 'folder' and
             len(sparent.get('meta', {}))):
         # gcd.addMetadataToFolder(dparent['_id'], sparent.get('meta', {}))
-        gcd.post(
-            f'folder/{dparent["_id"]}/metadata',
-            data=json.dumps(sparent['meta']),
-            headers={'X-HTTP-Method': 'PUT', 'Content-Type': 'application/json'})
+        if opts.dry_run:
+            print(f'Copy folder metadata from {sparent["name"]}')
+        else:
+            gcd.post(
+                f'folder/{dparent["_id"]}/metadata',
+                data=json.dumps(sparent['meta']),
+                headers={'X-HTTP-Method': 'PUT', 'Content-Type': 'application/json'})
     for sfolder in gcs.listFolder(sparent['_id'], sparent['_modelType']):
-        print('folder', sfolder['name'])
-        dfolder = gcd.createFolder(
-            dparent['_id'], sfolder['name'], sfolder['description'],
-            dparent['_modelType'], sfolder['public'], True)
+        if opts.dry_run:
+            print(f'Create folder {sfolder["name"]}')
+        else:
+            print('folder', sfolder['name'])
+            dfolder = gcd.createFolder(
+                dparent['_id'], sfolder['name'], sfolder['description'],
+                dparent['_modelType'], sfolder['public'], True)
+            adjust_permissions(gcs, gcd, opts, 'folder', sfolder, dfolder)
         copy_folder(gcs, gcd, sfolder, dfolder, opts)
     if sparent['_modelType'] != 'folder':
         return
@@ -38,11 +51,14 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
         ditem = gcd.createItem(
             dparent['_id'], sitem['name'], sitem['description'], True)
         if len(sitem.get('meta', {})):
-            # gcd.addMetadataToItem(ditem['_id'], sitem.get('meta', {}))
-            gcd.post(
-                f'item/{ditem["_id"]}/metadata',
-                data=json.dumps(sitem['meta']),
-                headers={'X-HTTP-Method': 'PUT', 'Content-Type': 'application/json'})
+            if opts.dry_run:
+                print(f'Copy item metadata from {sitem["name"]}')
+            else:
+                # gcd.addMetadataToItem(ditem['_id'], sitem.get('meta', {}))
+                gcd.post(
+                    f'item/{ditem["_id"]}/metadata',
+                    data=json.dumps(sitem['meta']),
+                    headers={'X-HTTP-Method': 'PUT', 'Content-Type': 'application/json'})
         hasli = 'largeImage' in sitem and 'expected' not in sitem['largeImage']
         setli = None
         if len(list(gcs.listFile(sitem['_id']))) != len(list(gcd.listFile(ditem['_id']))):
@@ -56,7 +72,7 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
                 if dfile is None:
                     dfile = direct_import(gcs, gcd, file, ditem, opts)
                     if dfile is not None:
-                        print('file - import', file['name'], file.get('size'))
+                        print('import file', file['name'], file.get('size'))
                 if dfile is None:
                     print('file', file['name'], file.get('size'))
                     if file.get('size') is None:
@@ -64,20 +80,27 @@ def copy_folder(gcs, gcd, sparent, dparent, opts):  # noqa
                         continue
                     with tempfile.TemporaryDirectory() as tmpdirname:
                         temppath = os.path.join(tmpdirname, 'temp.tmp')
-                        gcs.downloadFile(file['_id'], temppath)
-                        dfile = gcd.uploadFileToItem(
-                            ditem['_id'], temppath, mimeType=file['mimeType'],
-                            filename=file['name'])
-                        switch_to_import(gcd, ditem, dfile, temppath, opts)
+                        try:
+                            gcs.downloadFile(file['_id'], temppath)
+                            if not opts.dry_run:
+                                dfile = gcd.uploadFileToItem(
+                                    ditem['_id'], temppath, mimeType=file['mimeType'],
+                                    filename=file['name'])
+                                switch_to_import(gcd, ditem, dfile, temppath, opts)
+                        except Exception:
+                            print(f'Failed to download file {file["name"]}')
                 if hasli and file['_id'] == sitem['largeImage'].get('fileId'):
                     setli = dfile
         if setli:
-            ditem = gcd.createItem(
-                dparent['_id'], sitem['name'], sitem['description'], True)
-            if 'largeImage' not in ditem or ditem['largeImage'].get('fileId') != setli['_id']:
-                print('set largeImage fileId')
-                gcd.delete(f'item/{ditem["_id"]}/tiles')
-                gcd.post(f'item/{ditem["_id"]}/tiles', parameters={'fileId': setli['_id']})
+            if opts.dry_run:
+                print(f'Create item {sitem["name"]} to set largeImage')
+            else:
+                ditem = gcd.createItem(
+                    dparent['_id'], sitem['name'], sitem['description'], True)
+                if 'largeImage' not in ditem or ditem['largeImage'].get('fileId') != setli['_id']:
+                    print('set largeImage fileId')
+                    gcd.delete(f'item/{ditem["_id"]}/tiles')
+                    gcd.post(f'item/{ditem["_id"]}/tiles', parameters={'fileId': setli['_id']})
         if opts.no_annot:
             continue
         try:
@@ -133,12 +156,15 @@ def direct_import(gcs, gcd, file, ditem, opts):
     if not existing.get('imported') or 'path' not in existing:
         return None
     try:
-        newfile = gcd.post(f'assetstore/{assetstore["_id"]}/import/single_path', parameters={
-            'path': existing['path'],
-            'itemId': ditem['_id'],
-            'name': file['name'],
-            'mimeType': file.get('mimeType'),
-        })
+        if opts.dry_run:
+            print(f'Post for direct import {existing["path"]}')
+        else:
+            newfile = gcd.post(f'assetstore/{assetstore["_id"]}/import/single_path', parameters={
+                'path': existing['path'],
+                'itemId': ditem['_id'],
+                'name': file['name'],
+                'mimeType': file.get('mimeType'),
+            })
     except Exception:
         return None
     return newfile
@@ -146,7 +172,10 @@ def direct_import(gcs, gcd, file, ditem, opts):
 
 def copy_annotations(opts, gcs, gcd, sitem, ditem):
     if opts.replace and len(gcd.get('annotation', parameters={'itemId': ditem['_id']})):
-        gcd.delete(f'annotation/item/{ditem["_id"]}')
+        if opts.dry_run:
+            print(f'Delete annotations for {ditem["name"]}')
+        else:
+            gcd.delete(f'annotation/item/{ditem["_id"]}')
     if (not len(gcs.get('annotation', parameters={'itemId': sitem['_id']})) or
             len(gcd.get('annotation', parameters={'itemId': ditem['_id']}))):
         return
@@ -157,7 +186,8 @@ def copy_annotations(opts, gcs, gcd, sitem, ditem):
         print(e)
         return
     print('put annotations')
-    gcd.post('annotation/item/%s' % ditem['_id'], data=ann)
+    if not opts.dry_run:
+        gcd.post('annotation/item/%s' % ditem['_id'], data=ann)
 
 
 def copy_data(opts):
@@ -185,9 +215,12 @@ def copy_resource(gcs, gcd, src_path, dest_path, opts):  # noqa
             gcd.get('resource/lookup', parameters={'path': dest_path})
         except Exception:
             dparent = gcd.get('resource/lookup', parameters={'path': os.path.dirname(dest_path)})
-            gcd.createFolder(
-                dparent['_id'], os.path.basename(dest_path), '',
-                dparent['_modelType'], True, True)
+            if opts.dry_run:
+                print(f'Create folder {os.path.basename(dest_path)}')
+            else:
+                gcd.createFolder(
+                    dparent['_id'], os.path.basename(dest_path), '',
+                    dparent['_modelType'], True, True)
     if src_path.rstrip('/') == '/user':
         for user in gcs.listUser():
             user_path = gcs.get(f'resource/{user["_id"]}/path', parameters={'type': 'user'})
@@ -213,9 +246,13 @@ def copy_resource(gcs, gcd, src_path, dest_path, opts):  # noqa
         dest_parts = dest_path.rstrip(os.path.sep).split(os.path.sep)
         try:
             dparent = gcd.get('resource/lookup', parameters={'path': os.path.dirname(dest_path)})
-            dtop = gcd.createFolder(
-                dparent['_id'], os.path.basename(dest_path), '',
-                dparent['_modelType'], True, True)
+            if opts.dry_run:
+                print(f'Create folder {os.path.basename(dest_path)}')
+            else:
+                dtop = gcd.createFolder(
+                    dparent['_id'], os.path.basename(dest_path), '',
+                    dparent['_modelType'], True, True)
+            adjust_permissions(gcs, gcd, opts, 'folder', stop, dtop)
         except girder_client.HttpError:
             dparent = None
         if dparent is None and len(dest_parts) >= 3 and dest_parts[0] == '' and (
@@ -227,25 +264,53 @@ def copy_resource(gcs, gcd, src_path, dest_path, opts):  # noqa
                 dtop = None
             if not dtop:
                 if dest_parts[1] == 'user':
-                    dtop = gcd.createUser(
-                        stop['login'], stop['email'], stop['firstName'],
-                        stop['lastName'], str(random.random()), stop['admin'])
+                    if opts.dry_run:
+                        print(f'Create user {stop["login"]}')
+                    else:
+                        dtop = gcd.createUser(
+                            stop['login'], stop['email'], stop['firstName'],
+                            stop['lastName'], str(random.random()), stop['admin'])
+                    adjust_permissions(gcs, gcd, opts, 'user', stop, dtop)
                 elif stop['_modelType'] == 'user':
-                    dtop = gcd.createCollection(stop['login'], 'From user account', False)
+                    if opts.dry_run:
+                        print(f'Create collection {stop["login"]}')
+                    else:
+                        dtop = gcd.createCollection(stop['login'], 'From user account', False)
+                    adjust_permissions(gcs, gcd, opts, 'collection', stop, dtop)
                 else:
-                    dtop = gcd.createCollection(stop['name'], stop['description'], stop['public'])
+                    if opts.dry_run:
+                        print(f'Create collection {stop["name"]}')
+                    else:
+                        dtop = gcd.createCollection(
+                            stop['name'], stop['description'], stop['public'])
+                    adjust_permissions(gcs, gcd, opts, 'collection', stop, dtop)
             for part in dest_parts[3:]:
                 dparent = dtop
-                dtop = gcd.createFolder(
-                    dparent['_id'], part, '',
-                    dparent['_modelType'], True, True)
+                if opts.dry_run:
+                    print(f'Create folder {part}')
+                else:
+                    dtop = gcd.createFolder(
+                        dparent['_id'], part, '',
+                        dparent['_modelType'], True, True)
+                adjust_permissions(gcs, gcd, opts, 'folder', stop, dtop)
     copy_folder(gcs, gcd, stop, dtop, opts)
+
+
+def adjust_permissions(gcs, gcd, opts, model, sresource, dresource):
+    if not opts.permissions:
+        return
+    source = gcs.get(f'resource/{sresource["_id"]}', parameters={'type': sresource['_modelType']})
+    print(source)
+    # ##DWM::
+    print('adjust')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Copy folders, items, and annotations from one girder '
-        'server to another.')
+        'server to another.  Note that if users are copied or added for '
+        'permissions, that added user will have a generic password and not '
+        'their original auth method.')
     parser.add_argument('--src-api', help='Source API url (through /api/v1).')
     parser.add_argument('--dest-api', help='Destination API url (through /api/v1).')
     parser.add_argument('--src-user', help='Source username.')
@@ -277,5 +342,15 @@ if __name__ == '__main__':
         'direct imports; if a file was imported on the source system and '
         'can be imported to this assetstore on the destintation system, do '
         'that in preference to downloading and uploading the file.')
+    parser.add_argument(
+        '-n', '--dry-run', action='store_true', help='If specified, print '
+        'what would be done, but do not actually copy anything.  This will '
+        'likely throw an exception as it will fail to create folders and '
+        'other resources that it needs to analyze what will occur.')
+    parser.add_argument(
+        '--permissions', action='store_true', help='If specified, replicate '
+        'users and groups if they do not exist, and make transferred '
+        'collections, folders, and annotations belong to the same users and '
+        'groups with the same access flags.  Unfinished')
     opts = parser.parse_args()
     copy_data(opts)

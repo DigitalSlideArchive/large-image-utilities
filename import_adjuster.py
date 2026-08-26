@@ -399,8 +399,11 @@ if __name__ == '__main__':  # noqa
                 'sha512': {'$exists': False}, 'linkUrl': {'$exists': False}}),
             key=lambda f: (f['name'], f['_id']))
         for file in tqdm(files):
-            hashcount += generate_hash(gc, opts, file)
-            count += 1
+            try:
+                hashcount += generate_hash(gc, opts, file)
+                count += 1
+            except Exception:
+                pass
         if opts.verbose >= 2:
             clear_line()
             print('Hashed %d/%d files' % (hashcount, count))
